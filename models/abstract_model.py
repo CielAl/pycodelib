@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-def GroupBlock(ABC,nn.Module):
-	
+
+class GroupBlock(ABC, nn.Module):
+
 	@property
 	def features(self):
 		return self.features
@@ -17,5 +16,3 @@ def GroupBlock(ABC,nn.Module):
 	@abstractmethod
 	def get_merge_target(self,*kwargs):
 		...
-	
-	
