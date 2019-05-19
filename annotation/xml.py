@@ -85,6 +85,7 @@ class Annotation(AbstractElement):
     ATTRIB: dict = {
         "LineColor": "62453",
     }
+    TAG_CLASS: str = "PathClass"
 
     @property
     def regions(self) -> RegionGroup:
@@ -104,27 +105,27 @@ class Annotation(AbstractElement):
     def add_region(self, region: Region):
         self.regions.add_region(region)
 
-    def add_contour(self, contour: np.ndarray):
+    def add_contour(self, contour: np.ndarray, region_class: str = None):
         region: Region = Region.build()
         region.add_contour(contour)
         self.add_region(region)
+        if region_class is not None:
+            self.set(type(self).TAG_CLASS, region_class)
 
 
 class AnnotationGroup(AbstractElement):
     NODE_NAME: str = "Annotations"
-    TAG_CLASS: str = "PathClass"
     ATTRIB: dict = {
         "MicronsPerPixel": "0.25"
     }
 
-    def add_annotation(self, annotation: Annotation, region_class: str = None):
+    def add_annotation(self, annotation: Annotation):
         self.append(annotation)
         annotation.set("ID", str(self.current_id))
         self.increment_id()
-        if region_class is not None:
-            self.set(type(self).TAG_CLASS, region_class)
 
     def add_contour(self, contour: np.ndarray, region_class: str = None):
         annotation = Annotation.build()
-        annotation.add_contour(contour)
-        self.add_annotation(annotation, region_class=region_class)
+        annotation.add_contour(contour, region_class=region_class)
+        self.add_annotation(annotation)
+
