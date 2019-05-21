@@ -48,8 +48,10 @@ class Vertices(AbstractElement):
         assert contour.ndim == 2, "Contour must be 2d nd-array: # points x 2"
         assert contour.shape[1] == 2, "Contour must have only two columns: x and y"
         for point in contour:
-            x = point[0]
-            y = point[1]
+            # important! While the documentation claims the return of find_contours is in order of
+            # (x,y), it is actually (y,x).
+            x = point[1]
+            y = point[0]
             self.add_coord(x, y)
 
 
