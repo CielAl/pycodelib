@@ -2,7 +2,22 @@
   <dictionary name="yxz1826">
     <words>
       <w>axml</w>
+      <w>cbam</w>
+      <w>conv</w>
+      <w>denseblock</w>
+      <w>denselayer</w>
+      <w>densenet</w>
+      <w>fname</w>
+      <w>joblib</w>
+      <w>logsumexp</w>
+      <w>nitems</w>
+      <w>opencv</w>
+      <w>pycodelib</w>
+      <w>pytable</w>
       <w>qupath</w>
+      <w>relu</w>
+      <w>scikit</w>
+      <w>tqdm</w>
     </words>
   </dictionary>
 </component>
