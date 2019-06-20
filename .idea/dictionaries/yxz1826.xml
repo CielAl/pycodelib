@@ -10,10 +10,12 @@
       <w>fname</w>
       <w>joblib</w>
       <w>logsumexp</w>
+      <w>maskpixel</w>
       <w>nitems</w>
       <w>opencv</w>
       <w>pycodelib</w>
       <w>pytable</w>
+      <w>pytables</w>
       <w>qupath</w>
       <w>relu</w>
       <w>scikit</w>

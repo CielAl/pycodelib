@@ -12,6 +12,8 @@
       <option name="ignoredIdentifiers">
         <list>
           <option value="torch.from_numpy" />
+          <option value="skimage.filters" />
+          <option value="PIL.Image" />
         </list>
       </option>
     </inspection_tool>
