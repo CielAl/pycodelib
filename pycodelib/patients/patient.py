@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import re
-from typing import Sequence, List, Dict, Any, Tuple
+from typing import Sequence, List, Dict, Any, Tuple, Set
 from abc import ABC, abstractmethod
 import logging
 
@@ -38,14 +38,23 @@ class SkinCollection(PatientCollection):
     _DEFAULT_CLASS = ['No Path', 'BCC', 'Situ', 'Invasive']
     _SLIDE_SEPARATOR: str = '_'
 
+    @property
+    def patient2slides(self):
+        return self._patient2slides
+
     def __init__(self, file_list, sheet_name: str, class_list: Sequence[str] = None):
         super().__init__()
         if class_list is None:
             class_list = type(self)._DEFAULT_CLASS
+        self._patient2slides: Dict[str, Set[str, ...]] = dict()
         self._class_list: Sequence[str] = class_list
         self.patient_sheet = None
         self._file_list = file_list
         self.load_ground_truth(sheet_name, class_list)
+
+    def add_slides_to_patient(self, patient_id: str, slide_id: str):
+        self.patient2slides[patient_id] = self.patient2slides.get(patient_id, set())
+        self.patient2slides[patient_id].add(slide_id)
 
     def parse_class_name_short(self, roi_class: str) -> str:
         parsed = [class_name for class_name in self.class_list
@@ -104,6 +113,7 @@ class SkinCollection(PatientCollection):
         for file in self.file_list:
             slide_id, class_name_full = self.slide_name(file)
             patient_id = self.slide2patient(slide_id)
+            self.add_slides_to_patient(patient_id, os.path.basename(file))
             class_name_short = self.parse_class_name_short(class_name_full)
             assert class_name_short in self.class_list, f'Class not in the list:{class_name_short}'
             entry = self.entry(class_name_short)
@@ -126,6 +136,7 @@ class SkinCollection(PatientCollection):
 
     # override
     def load_ground_truth(self, sheet_name: str, class_list: Sequence[str]):
+        assert hasattr(self, 'patient2slides')
         self.load_patient_sheet(sheet_name)
         self.build_patient_record(columns=class_list)
         self._write_gt()
