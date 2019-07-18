@@ -1,8 +1,20 @@
-from typing import Callable, Tuple, Dict, Iterable, Any
+from typing import Callable, Tuple, Dict, Any, List
 import torch
 from torchnet.engine import Engine
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from torch.optim.optimizer import Optimizer
+import torch.nn as nn
+from pycodelib.dataset import Dataset
+import logging
+logging.basicConfig(level=logging.debug)
+
+
+class IteratorBuilder(ABC, Dataset):
+    BATCH_SIZE: int = 32
+    @classmethod
+    @abstractmethod
+    def get_iterator(cls, mode, shuffle, num_workers=6, drop_last=False,  pin_memory=True, batch_size=BATCH_SIZE):
+        ...
 
 
 class AbstractEngine(Callable):
@@ -24,15 +36,16 @@ class AbstractEngine(Callable):
         return self._loss
 
     @abstractmethod
-    def model_eval(self, data_batch: Tuple) -> Tuple[torch.Tensor, torch.Tensor]:
+    def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
         ...
 
-    def __call__(self, data_batch) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __call__(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
         loss, pred = self.model_eval(data_batch)
         return loss, pred
 
-    def __init__(self, model: Callable, loss: Callable, iterator: Iterable):
-        self._engine = Engine()
+    def __init__(self, device: torch.device, model: nn.Module, loss: nn.Module, iterator_getter: IteratorBuilder):
+        self._maxepoch: int = -1
+        self._engine: Engine = Engine()
         self._hooks: Dict[str, Callable] = dict({
                     "on_start": self.on_start,
                     "on_start_epoch": self.on_start_epoch,
@@ -42,12 +55,15 @@ class AbstractEngine(Callable):
                     "on_end_epoch": self.on_end_epoch,
                     "on_end": self.on_end,
         })
-        self._model = model
-        self._loss = loss
-        self.iterator = iterator
+        self.device: torch.device = device
+        self._model: nn.Module = model.to(device)
+        self._loss: nn.Module = loss
+        self.iterator_getter: IteratorBuilder = iterator_getter
 
     def process(self, maxepoch: int, optimizer: Optimizer):
-        self.engine.train(self, self.iterator, maxepoch=maxepoch, optimizer=optimizer)
+        self._maxepoch = maxepoch
+        self.engine.train(self, self.iterator_getter.get_iterator(mode=True, shuffle=True),
+                          maxepoch=self._maxepoch, optimizer=optimizer)
 
     @abstractmethod
     def on_start(self, state: Dict[str, Any]):
@@ -75,10 +91,4 @@ class AbstractEngine(Callable):
 
     @abstractmethod
     def on_end(self, state: Dict[str, Any]):
-        ...
-
-
-class Test(AbstractEngine):
-
-    def __call__(self, s: Tuple):
         ...
