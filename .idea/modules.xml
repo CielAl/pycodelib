@@ -3,6 +3,8 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/../H5Database/.idea/H5Database.iml" filepath="$PROJECT_DIR$/../H5Database/.idea/H5Database.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../HistoQC/.idea/HistoQC.iml" filepath="$PROJECT_DIR$/../HistoQC/.idea/HistoQC.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../melanoma/.idea/melanoma.iml" filepath="$PROJECT_DIR$/../melanoma/.idea/melanoma.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/pycodelib.iml" filepath="$PROJECT_DIR$/.idea/pycodelib.iml" />
     </modules>
   </component>
