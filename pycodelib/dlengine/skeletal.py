@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from torch.optim.optimizer import Optimizer
 import torch.nn as nn
 from pycodelib.dataset import Dataset
+from torchnet.meter.meter import Meter
 import logging
 logging.basicConfig(level=logging.debug)
 
@@ -48,17 +49,18 @@ class AbstractEngine(Callable):
         self._engine: Engine = Engine()
         self._hooks: Dict[str, Callable] = dict({
                     "on_start": self.on_start,
-                    "on_start_epoch": self.on_start_epoch,
-                    "on_sample": self.on_sample,
-                    "on_forward": self.on_forward,
-                    "on_update": self.on_update,
-                    "on_end_epoch": self.on_end_epoch,
+                    "on_start_epoch": self.on_start_epoch,  # train exclusive
+                    "on_sample": self.on_sample,            # get data point from the data-loader
+                    "on_forward": self.on_forward,          # the only phase that both train/test applies
+                    "on_update": self.on_update,            # train exclusive, after the "step" of backward updating
+                    "on_end_epoch": self.on_end_epoch,      # train exclusive - usually test is invoked here
                     "on_end": self.on_end,
         })
         self.device: torch.device = device
         self._model: nn.Module = model.to(device)
         self._loss: nn.Module = loss
         self.iterator_getter: IteratorBuilder = iterator_getter
+        self.meter_dict: Dict = dict()
 
     def process(self, maxepoch: int, optimizer: Optimizer):
         self._maxepoch = maxepoch
@@ -92,3 +94,6 @@ class AbstractEngine(Callable):
     @abstractmethod
     def on_end(self, state: Dict[str, Any]):
         ...
+
+    def add_meter(self, name: str, meter: Meter):
+        self.meter_dict[name] = meter
