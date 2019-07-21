@@ -5,7 +5,6 @@ import re
 from typing import Sequence, List, Dict, Any, Tuple, Set
 from abc import ABC, abstractmethod
 
-
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -36,7 +35,7 @@ class PatientCollection(ABC):
         ...
 
 
-class SkinCollection(PatientCollection):
+class SheetCollection(PatientCollection):
     _DEFAULT_CLASS = ['No Path', 'BCC', 'Situ', 'Invasive']
     _SLIDE_SEPARATOR: str = '_'
 
