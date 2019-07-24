@@ -4,17 +4,31 @@ from torchnet.engine import Engine
 from abc import ABC, abstractmethod
 from torch.optim.optimizer import Optimizer
 import torch.nn as nn
-from pycodelib.dataset import Dataset
+from torch.utils.data import Dataset as TorchDataSet
 from torchnet.meter.meter import Meter
 import logging
 logging.basicConfig(level=logging.debug)
 
 
-class IteratorBuilder(ABC, Dataset):
+class AbstractIteratorBuilder(ABC):
+    @property
+    def dataset(self):
+        return self.dataset
+
+    def __init__(self, dataset: TorchDataSet):
+        self._dataset = dataset
+
+
+class IteratorBuilder(AbstractIteratorBuilder):
     BATCH_SIZE: int = 32
     @classmethod
     @abstractmethod
     def get_iterator(cls, mode, shuffle, num_workers=6, drop_last=False,  pin_memory=True, batch_size=BATCH_SIZE):
+        ...
+
+    @property
+    @abstractmethod
+    def mode(self):
         ...
 
 

@@ -3,17 +3,23 @@ import torch
 import numpy as np
 import numbers
 from torchnet.meter.meter import Meter
+from pycodelib.patients import SheetCollection
 
 
 class MultiInstanceMeter(Meter):
 
     @property
-    def instance_map(self):
+    def instance_map(self) -> Dict:
         return self._instance_map
 
-    def __init__(self):
+    @property
+    def patient_col(self):
+        return self._patient_col
+
+    def __init__(self, patient_col: SheetCollection):
         super().__init__()
         self._instance_map: Dict[Hashable, Any] = dict()
+        self._patient_col = patient_col
 
     def add(self, elements: Tuple[Union[torch.Tensor, Sequence[Hashable]], Union[torch.Tensor, Sequence]]):
         keys, values = elements
@@ -38,6 +44,8 @@ class MultiInstanceMeter(Meter):
         self.add((keys, values))
 
     def value(self):
+        for key, v in self.instance_map.items():
+            self.load_prediction()
         return self.instance_map.keys(), self.instance_map.values()
 
     def reset(self):

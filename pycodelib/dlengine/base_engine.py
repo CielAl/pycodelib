@@ -24,9 +24,9 @@ class SkinEngine(AbstractEngine):
         self.patient_col = patient_col
 
         self.add_meter('accuracy_meter', ClassErrorMeter(accuracy=True))
-        self.add_meter('conf_meter', ConfusionMeter(num_classes, normalized=False))
+        self.add_meter('conf_meter', ConfusionMeter(self.num_classes, normalized=False))
         self.add_meter('loss_meter', AverageValueMeter())
-        self.add_meter('multi_instance_meter', MultiInstanceMeter())
+        self.add_meter('multi_instance_meter', MultiInstanceMeter(self.patient_col))
         self.add_meter('auc_meter', AUCMeter())
 
     def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:

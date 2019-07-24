@@ -23,6 +23,10 @@ class PatientCollection(ABC):
         ...
 
     @abstractmethod
+    def load_prediction(self, **kwargs):
+        ...
+
+    @abstractmethod
     def load_ground_truth(self, **kwargs):
         ...
 
@@ -78,7 +82,7 @@ class SheetCollection(PatientCollection):
                 for component in name_components
             ]
         ).nonzero()[0]
-        assert index_match_array.size == 1 and index_match_array[0] < len(name_components) - 1, f"Got:" \
+        assert index_match_array.size == 1 and index_match_array[0] < len(name_components) - 1, f"no match. Got:" \
             f"{index_match_array},{name_components},{basename}"
         slide_id = name_components[0].split()[0]
         index_match = index_match_array[0]
@@ -96,6 +100,7 @@ class SheetCollection(PatientCollection):
         return patient_id
 
     def entry(self, class_value: str) -> Dict[str, int]:
+        assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
         entry: Dict[str, int] = {c: 1 if c == class_value else 0 for c in self.class_list}
         return entry
 
@@ -151,15 +156,32 @@ class SheetCollection(PatientCollection):
     def file_list(self):
         return self._file_list
 
-    def load_prediction(self, pred_class_name: Sequence[str], filenames: Sequence[str]):
+    def load_prediction(self, pred_class_names: Sequence[str], filenames: Sequence[str], flush: bool = True):
+        assert self.patient_prediction.size is not None, f"Prediction not initialized"
+        if flush:
+            self.patient_prediction.drop(self.patient_prediction.index, inplace=True)
         file_basename_list: List[str] = [os.path.basename(f) for f in filenames]
         slide_id_list: List[str] = [self.slide_name(f)[0] for f in file_basename_list]
-        entry_list: List[Dict[str, int]] = [self.entry(pred) for pred in pred_class_name]
+        entry_list: List[Dict[str, int]] = [self.entry(pred) for pred in pred_class_names]
         for (slide_id, entry) in zip(slide_id_list, entry_list):
-            self.insert_entry(self.patient_prediction, slide_id, entry)
+            patient_id = self.slide2patient(slide_id)
+            self.insert_entry(self.patient_prediction, patient_id, entry)
 
     # only perform evaluation. manual loading of prediction required
-    def evaluate(self, target_column: str) -> Tuple[pd.Series, ...]:
+    def prediction(self, target_column: str) -> Tuple[pd.Series, ...]:
+        assert self.patient_prediction.size > 0, f"Prediction not loaded"
         pred = self.patient_prediction.loc[self.patient_prediction.index, target_column]
-        ground_truth = self.patient_ground_truth[self.patient_prediction.index, target_column]
+        breakpoint()
+        ground_truth = self.patient_ground_truth.loc[self.patient_prediction.index, target_column]
+        assert ground_truth.index is pred.index, f'Index not Matched'
         return pred, ground_truth
+
+    @abstractmethod
+    def evaluate(self, **kwargs):
+        ...
+
+
+class SkinCollection(SheetCollection):
+
+    def evaluate(self, **kwargs):
+        ...
