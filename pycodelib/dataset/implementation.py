@@ -3,6 +3,8 @@ import torch
 from torch.utils.data import Dataset as TorchDataset
 from typing import Sequence, Callable
 from abc import ABC, abstractmethod
+
+
 # -todo pytable-based base class
 
 
@@ -28,11 +30,9 @@ class H5SetBasic(ABC, TorchDataset):
                 self.class_sizes = db.root.class_sizes[:]
             else:
                 self.class_sizes = None
-
-            with tables.open_file(self.filename, 'r') as db:
-                self.img_list = getattr(db.root, self.types[0])
-                self.label_list = getattr(db.root, self.types[1])
-                self.filename_list = getattr(db.root, 'filename')
+            self.img_list = getattr(db.root, self.types[0])
+            self.label_list = getattr(db.root, self.types[1])
+            self.filename_list = getattr(db.root, 'filename')
 
     def __len__(self):
         with tables.open_file(self.filename, 'r') as db:
@@ -52,7 +52,7 @@ class H5SetTransform(H5SetBasic):
     def img_transform(self):
         return self._img_transform
 
-    def __init__(self, filename: str, img_transform: Callable = None, types:Sequence[str] = None):
+    def __init__(self, filename: str, img_transform: Callable = None, types: Sequence[str] = None):
         # nothing special here, just internalizing the constructor parameters
         super().__init__(filename, types)
         self._img_transform = img_transform
@@ -69,8 +69,6 @@ class H5SetTransform(H5SetBasic):
         if self.img_transform is not None:
             img_new = self.img_transform(img)
         return img_new, label, img, filename.decode('utf-8'), index
-
-
 
 
 class MultiSet(TorchDataset):
