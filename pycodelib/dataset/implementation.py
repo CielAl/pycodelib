@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 # -todo pytable-based base class
 
 
-class H5SetBasic(ABC, TorchDataset):
+class H5SetBasic(TorchDataset):
     @property
     def filename(self):
         return self._filename
@@ -38,7 +38,6 @@ class H5SetBasic(ABC, TorchDataset):
         with tables.open_file(self.filename, 'r') as db:
             return getattr(db.root, self.types[0]).shape[0]
 
-    @abstractmethod
     def __getitem__(self, index):
         img = self.img_list[index, ]
         label = self.label_list[index, ]
