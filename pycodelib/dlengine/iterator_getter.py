@@ -2,7 +2,7 @@ from typing import Dict
 
 from torch.utils.data import DataLoader
 # from torch.utils.data import Dataset
-from pycodelib.dataset import Dataset as H5Set
+from pycodelib.dataset import H5SetTransform as H5Set
 from pycodelib.dlengine.skeletal import IteratorBuilder
 
 
@@ -10,16 +10,17 @@ class H5DataGetter(IteratorBuilder):
     _datasets_container: Dict[bool, IteratorBuilder] = None
     BATCH_SIZE: int = 32
 
-    def __init__(self, filename: str, img_transform, mode, constructor: type = H5Set):
+    def __init__(self, filename: str, img_transform, mode, constructor: type = H5SetTransform):
         dataset: constructor = constructor(filename, img_transform=img_transform)
         super().__init__(dataset)
         self._train_mode = mode
 
-    @classmethod
-    def build(cls, filename_dict: Dict[bool, str], img_transform_dict: Dict[bool, object]):
+
+    def build(self, filename_dict: Dict[bool, str], img_transform_dict: Dict[bool, object]):
         assert filename_dict.keys() == img_transform_dict.keys(), 'Keys disagree.'
         cls._datasets_container: Dict[bool, cls] = {x: H5DataGetter(filename_dict[x], img_transform_dict[x], x)
                                                     for x in filename_dict.keys()}
+        return cls
 
     @property
     def mode(self):
@@ -27,7 +28,7 @@ class H5DataGetter(IteratorBuilder):
 
     @property
     def dataset(self):
-        return super().dataset
+        return super()._dataset
 
     @classmethod
     def get_iterator(cls, mode: bool, shuffle: bool,
