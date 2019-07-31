@@ -1,10 +1,11 @@
 import tables
+import numpy as np
 import torch
 from torch.utils.data import Dataset as TorchDataset
 from typing import Sequence, Callable
-from abc import ABC, abstractmethod
-
-
+import logging
+logging.basicConfig(level=logging.DEBUG)
+# from abc import ABC, abstractmethod
 # -todo pytable-based base class
 
 
@@ -30,19 +31,24 @@ class H5SetBasic(TorchDataset):
                 self.class_sizes = db.root.class_sizes[:]
             else:
                 self.class_sizes = None
-            self.img_list = getattr(db.root, self.types[0])
-            self.label_list = getattr(db.root, self.types[1])
-            self.filename_list = getattr(db.root, 'filename')
 
     def __len__(self):
         with tables.open_file(self.filename, 'r') as db:
             return getattr(db.root, self.types[0]).shape[0]
 
     def __getitem__(self, index):
-        img = self.img_list[index, ]
-        label = self.label_list[index, ]
-        filename = self.filename_list.filename[index]
-        return img, label, filename, index
+        with tables.open_file(self.filename, 'r') as db:
+            img_list = getattr(db.root, self.types[0])
+            label_list = getattr(db.root, self.types[1])
+            filename_list = getattr(db.root, 'filename')
+            img = img_list[index, ]
+            label = label_list[index, ]
+            filenames = filename_list[index, ]
+        if isinstance(index, slice):
+            filenames = [x.decode('utf-8') for x in filenames]
+        else:
+            filenames = filenames.decode('utf-8')
+        return img, label, filenames, index
 
 
 class H5SetTransform(H5SetBasic):
@@ -51,7 +57,7 @@ class H5SetTransform(H5SetBasic):
     def img_transform(self):
         return self._img_transform
 
-    def __init__(self, filename: str, img_transform: Callable = None, types: Sequence[str] = None):
+    def __init__(self, filename: str, types: Sequence[str] = None, img_transform: Callable = None):
         # nothing special here, just internalizing the constructor parameters
         super().__init__(filename, types)
         self._img_transform = img_transform
@@ -102,8 +108,8 @@ class MultiSet(TorchDataset):
 
 class MemSet(TorchDataset):
 
-    def __init__(self, ndarray, img_transform=None):
-        self.data = ndarray
+    def __init__(self, data: np.ndarray, img_transform=None):
+        self.data = data
         self.img_transform = img_transform
 
     def __len__(self):
@@ -128,18 +134,18 @@ class DatasetArrayTest:
 
 
 class DatasetPytableTest(TorchDataset):
-    def __init__(self, fname, img_transform):
-        self.fname = fname
-        with tables.open_file(self.fname, 'r') as db:
-            self.nitems = db.root.img.shape[0]
+    def __init__(self, file_name, img_transform):
+        self.file_name = file_name
+        with tables.open_file(self.file_name, 'r') as db:
+            self.num_items = db.root.img.shape[0]
         self.img_transform = img_transform
 
     def __getitem__(self, index):
-        with tables.open_file(self.fname, 'r') as db:
+        with tables.open_file(self.file_name, 'r') as db:
             img = db.root.img[index, ]
             label = db.root.label[index]
             img_new = self.img_transform(img)
         return img_new, label, img
 
     def __len__(self):
-        return self.nitems
+        return self.num_items

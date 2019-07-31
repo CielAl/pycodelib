@@ -1,4 +1,4 @@
-from .skeletal import AbstractEngine, IteratorBuilder
+from .skeletal import AbstractEngine, ModeIteratorBuilder
 from .multi_instance_meter import MultiInstanceMeter
 from pycodelib.patients import SheetCollection
 from typing import Tuple, Dict, Any, Sequence, List, Callable
@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.debug)
 
 class SkinEngine(AbstractEngine):
 
-    def __init__(self, device: torch.device, model: nn.Module, loss: nn.Module, iterator_getter: IteratorBuilder,
+    def __init__(self, device: torch.device, model: nn.Module, loss: nn.Module, iterator_getter: ModeIteratorBuilder,
                  val_phases: Sequence[str, ...],
                  class_names: int,
                  patient_col: SheetCollection):

@@ -4,31 +4,22 @@ from torchnet.engine import Engine
 from abc import ABC, abstractmethod
 from torch.optim.optimizer import Optimizer
 import torch.nn as nn
-from torch.utils.data import Dataset as TorchDataSet
+# from torch.utils.data import Dataset as TorchDataSet
 from torchnet.meter.meter import Meter
 import logging
-logging.basicConfig(level=logging.debug)
+logging.basicConfig(level=logging.DEBUG)
 
 
 class AbstractIteratorBuilder(ABC):
-    @property
-    def dataset(self):
-        return self.dataset
-
-    def __init__(self, dataset: TorchDataSet):
-        self._dataset = dataset
-
-
-class IteratorBuilder(AbstractIteratorBuilder):
     BATCH_SIZE: int = 32
     @classmethod
     @abstractmethod
-    def get_iterator(cls, mode, shuffle, num_workers=6, drop_last=False,  pin_memory=True, batch_size=BATCH_SIZE):
+    def get_iterator(cls, mode, shuffle, num_workers=4, drop_last=False,  pin_memory=True, batch_size=4):
         ...
 
     @property
     @abstractmethod
-    def mode(self):
+    def datasets_collection(self):
         ...
 
 
@@ -58,7 +49,8 @@ class AbstractEngine(Callable):
         loss, pred = self.model_eval(data_batch)
         return loss, pred
 
-    def __init__(self, device: torch.device, model: nn.Module, loss: nn.Module, iterator_getter: IteratorBuilder):
+    def __init__(self, device: torch.device, model: nn.Module, loss: nn.Module,
+                 iterator_getter: AbstractIteratorBuilder):
         self._maxepoch: int = -1
         self._engine: Engine = Engine()
         self._hooks: Dict[str, Callable] = dict({
@@ -73,7 +65,7 @@ class AbstractEngine(Callable):
         self.device: torch.device = device
         self._model: nn.Module = model.to(device)
         self._loss: nn.Module = loss
-        self.iterator_getter: IteratorBuilder = iterator_getter
+        self.iterator_getter: AbstractIteratorBuilder = iterator_getter
         self.meter_dict: Dict = dict()
 
     def process(self, maxepoch: int, optimizer: Optimizer):
