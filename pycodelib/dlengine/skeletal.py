@@ -9,6 +9,7 @@ from torchnet.meter.meter import Meter
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
+logging.debug(__name__)
 
 class AbstractIteratorBuilder(ABC):
     BATCH_SIZE: int = 32

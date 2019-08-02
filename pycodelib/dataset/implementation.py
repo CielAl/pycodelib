@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset as TorchDataset
 from typing import Sequence, Callable
+from pycodelib import common
 import logging
 logging.basicConfig(level=logging.DEBUG)
 # from abc import ABC, abstractmethod
@@ -10,6 +11,16 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class H5SetBasic(TorchDataset):
+
+    @staticmethod
+    def slice2array(index: slice, length: int):
+        start, stop, step = index.start, index.stop, index.step
+        step = common.default_not_none(step, 1)
+        start = common.default_not_none(start, 0)
+        stop = common.default_not_none(stop, length)
+        assert step != 0, 'step is 0'
+        return np.arange(start, stop, step)
+
     @property
     def filename(self):
         return self._filename
@@ -48,7 +59,11 @@ class H5SetBasic(TorchDataset):
             filenames = [x.decode('utf-8') for x in filenames]
         else:
             filenames = filenames.decode('utf-8')
-        return img, label, filenames, index
+        if isinstance(index, slice):
+            index_out = type(self).slice2array(index, len(self))
+        else:
+            index_out = np.asarray(index)
+        return img, label, filenames, index_out
 
 
 class H5SetTransform(H5SetBasic):
