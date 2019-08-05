@@ -4,7 +4,7 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 import PIL
 import time
-img_transform = \
+img_transform =  \
  transforms.Compose([
         transforms.ToPILImage(),
         transforms.RandomHorizontalFlip(),
@@ -17,13 +17,15 @@ img_transform = \
 getter = H5DataGetter.build({True: pydir, False: pydir}, {True: img_transform, False: img_transform})
 
 
-dl = getter.get_iterator(True, True, num_workers=6, pin_memory=True)
+dl = getter.get_iterator(True, True, num_workers=12, pin_memory=True, batch_size=32)
 
 start = time.time()
 for x in dl:
-    continue
+    break
 end = time.time()
 print(end-start)
+# test = img_transform(x[0][1,].numpy()).permute([1,2,0])
 #None: 268.679571390152
 #aug: 976
-#250.12752485275269 --> 6 workers
+# No Aug = 98.83628535270691 -> 6workers/Batch 32 ||
+# Aug = 250.12752485275269 --> 6 workers/Batch 32 ||237.85382866859436 64batch
