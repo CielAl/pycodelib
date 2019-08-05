@@ -47,6 +47,16 @@ class H5SetBasic(TorchDataset):
         with tables.open_file(self.filename, 'r') as db:
             return getattr(db.root, self.types[0]).shape[0]
 
+    @staticmethod
+    def recover_dim(img, return_tensor: bool = True):
+        if not (len(img.shape) < 2 and img.shape[0] == 1):
+            return img
+        if return_tensor:
+            img = torch.from_numpy(img)
+        else:  # add leading singleton dim
+            img = img[None, ]
+        return img
+
     def __getitem__(self, index):
         with tables.open_file(self.filename, 'r') as db:
             img_list = getattr(db.root, self.types[0])
@@ -63,6 +73,7 @@ class H5SetBasic(TorchDataset):
             index_out = type(self).slice2array(index, len(self))
         else:
             index_out = np.asarray(index)
+        img = type(self).recover_dim(img)
         return img, label, filenames, index_out
 
 
@@ -82,13 +93,11 @@ class H5SetTransform(H5SetBasic):
         # an issue with multi-threading so doing here. need to do it every time, otherwise hdf5 crashes
         img, label, filename, index = super().__getitem__(index)
         img_new = img
-
-        if len(img.shape) == 2 and img.shape[0] == 1:
-            # img_new = np.expand_dims(img_list, axis=0)
-            img_new = torch.from_numpy(img_new)
+        # if row vector (dimension reduced or not)
+        # otherwise do the transformation in prior of the collate function.
         if self.img_transform is not None:
             img_new = self.img_transform(img)
-        return img_new, label, img, filename.decode('utf-8'), index
+        return img_new, label, img, filename, index
 
 
 class MultiSet(TorchDataset):
@@ -135,32 +144,3 @@ class MemSet(TorchDataset):
         if self.img_transform is not None:
             img = self.img_transform(img)
         return img
-
-
-class DatasetArrayTest:
-    def __init__(self, data):
-        self.data = data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        return self.data[index, ]
-
-
-class DatasetPytableTest(TorchDataset):
-    def __init__(self, file_name, img_transform):
-        self.file_name = file_name
-        with tables.open_file(self.file_name, 'r') as db:
-            self.num_items = db.root.img.shape[0]
-        self.img_transform = img_transform
-
-    def __getitem__(self, index):
-        with tables.open_file(self.file_name, 'r') as db:
-            img = db.root.img[index, ]
-            label = db.root.label[index]
-            img_new = self.img_transform(img)
-        return img_new, label, img
-
-    def __len__(self):
-        return self.num_items

@@ -1,7 +1,7 @@
 from typing import Dict, Callable
 from torch.utils.data import DataLoader
 import torch.utils.data.dataloader
-from pycodelib.dataset import H5SetBasic
+from pycodelib.dataset import H5SetBasic, H5SetTransform
 from pycodelib.dlengine.skeletal import AbstractIteratorBuilder
 from torchvision.transforms import Compose
 from typing import List, Tuple
@@ -13,6 +13,7 @@ default_collate: Callable = torch.utils.data.dataloader.default_collate
 
 
 class BasicTransform(Callable):
+
     def __init__(self, collate_fn: Callable, transforms: Compose):
         self.collate_fn: Callable = collate_fn
         self.transforms = transforms
@@ -31,6 +32,7 @@ class TransformAutoCollate(BasicTransform):
     def __call__(self, batch: List[Tuple]):
         if self.transforms is not None:
             for idx, data_point in enumerate(batch):
+                # logging.debug(f'collate')
                 img, label, filenames, index = data_point
                 batch[idx] = self.transforms(img), label, img, filenames, index
         batch = self.collate_fn(batch)
@@ -55,13 +57,14 @@ class H5DataGetter(AbstractIteratorBuilder):
         self._mode: bool = True
 
     @classmethod
-    def build(cls, filename_dict: Dict[bool, str], img_transform_dict: Dict[bool, Compose]):
+    def build(cls, filename_dict: Dict[bool, str],
+              img_transform_dict: Dict[bool, Compose]):
         assert filename_dict.keys() == img_transform_dict.keys(), 'Keys disagree.'
         datasets: Dict[bool, H5SetBasic] = {
                     x: H5SetBasic(filename_dict[x])
                     for x in filename_dict.keys()
         }
-        iter_getter = cls(datasets=datasets, img_transform_dict=img_transform_dict)
+        iter_getter = cls(datasets=datasets, img_transform_dict=img_transform_dict)  # {True: None, False: None}
         return iter_getter
 
     @property
