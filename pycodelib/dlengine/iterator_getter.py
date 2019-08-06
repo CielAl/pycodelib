@@ -1,7 +1,7 @@
 from typing import Dict, Callable
 from torch.utils.data import DataLoader
 import torch.utils.data.dataloader
-from pycodelib.dataset import H5SetBasic, H5SetTransform
+from pycodelib.dataset import H5SetBasic
 from pycodelib.dlengine.skeletal import AbstractIteratorBuilder
 from torchvision.transforms import Compose
 from typing import List, Tuple
