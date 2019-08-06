@@ -48,7 +48,7 @@ class H5SetBasic(TorchDataset):
             return getattr(db.root, self.types[0]).shape[0]
 
     @staticmethod
-    def recover_dim(img, return_tensor: bool = True):
+    def dim_recovered_data(img, return_tensor: bool = True):
         if not (len(img.shape) < 2 and img.shape[0] == 1):
             return img
         if return_tensor:
@@ -73,7 +73,7 @@ class H5SetBasic(TorchDataset):
             index_out = type(self).slice2array(index, len(self))
         else:
             index_out = np.asarray(index)
-        img = type(self).recover_dim(img)
+        img = type(self).dim_recovered_data(img)
         return img, label, filenames, index_out
 
 
@@ -91,13 +91,14 @@ class H5SetTransform(H5SetBasic):
     def __getitem__(self, index):
         # opening should be done in __init__ but seems to be
         # an issue with multi-threading so doing here. need to do it every time, otherwise hdf5 crashes
-        img, label, filename, index = super().__getitem__(index)
+        img, label, filename, *rest = super().__getitem__(index)
         img_new = img
+        index_out = rest[-1]
         # if row vector (dimension reduced or not)
         # otherwise do the transformation in prior of the collate function.
         if self.img_transform is not None:
             img_new = self.img_transform(img)
-        return img_new, label, img, filename, index
+        return img_new, label, img, filename, index_out
 
 
 class MultiSet(TorchDataset):
