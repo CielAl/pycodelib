@@ -134,10 +134,22 @@ class SkinEngine(AbstractEngine):
             v.reset()
 
     def _evaluation(self, state):
+        """
+            (1) Print all results: loss/auc/conf
+            (2) Perform Patient-level evaluation
+        Args:
+            state: See on_start
+
+        Returns:
+
+        """
         # todo test
         ...
         print('[Epoch %d] Testing Loss: %.4f (Accuracy: %.2f%%)' % (
-            state['epoch'], self.meter_dict['loss_meter'].value()[0], self.meter_dict['patch_accuracy_meter'].value()[0]))
+            state['epoch'],
+            self.meter_dict['loss_meter'].value()[0],
+            self.meter_dict['patch_accuracy_meter'].value()[0])
+        )
         print(self.meter_dict['conf_meter'].value())
         self._fetch_prediction()
 
@@ -196,6 +208,9 @@ class SkinEngine(AbstractEngine):
         # Posterior score
         pred_softmax = softmax(pred_data)
         patch_name_score: Tuple = (filename, pred_softmax)
+        """ 
+            Note: the score per sample (single data point) is not reduced. Values of all categories are retained.
+        """
         self.meter_dict['multi_instance_meter'].add(patch_name_score)
 
         if self.num_classes == 2:
