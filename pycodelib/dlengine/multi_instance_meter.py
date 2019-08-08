@@ -57,13 +57,15 @@ class MultiInstanceMeter(Meter):
 
         if torch.is_tensor(obj_in):
             obj: np.ndarray = obj_in.cpu().squeeze().numpy()
-            if at_least_1d:
-                obj: np.ndarray = np.atleast_1d(obj)
         # pack to np array if a scalar of matched type or is already in vector form.
         elif is_matched_scalar or already_vector:
             obj: np.ndarray = np.asarray([obj_in])
         else:
             raise TypeError(err_msg)
+        if at_least_1d:
+            obj: np.ndarray = np.atleast_1d(obj)
+        else:
+            obj: np.ndarray = obj.squeeze()
         return obj
 
     def add(self, elements: Tuple[Union[torch.Tensor, Sequence[Hashable]], Union[torch.Tensor, Sequence]]):
@@ -80,12 +82,14 @@ class MultiInstanceMeter(Meter):
         keys_in, values_in = elements
 
         # Vectorization:
+        # breakpoint()
         keys = type(self).vectorized_obj(keys_in, Hashable, at_least_1d=False, err_msg=f"{type(keys_in)}")
         values = type(self).vectorized_obj(values_in, numbers.Number, at_least_1d=True, err_msg=f"{type(values_in)}")
 
         # Now keys and values are numpy arrays.
         # Validate if the length agree.
-        assert len(keys) == values.shape[0], f"Length not agree. key={len(keys)}. values={values.shape[0]}"
+        assert keys.shape[0] == values.shape[0], f"Length not agree. key={keys}|{len(keys)}." \
+            f" values={values}|{values.shape[0]}"
 
         # insert keys and values into a dict: self.instance_map.
         for k, v in zip(keys, values):
@@ -111,14 +115,38 @@ class MultiInstanceMeter(Meter):
         Returns:
             todo
         """
-        for key, v in self.instance_map.items():
-            self.load_prediction()
+        # for each v: List of array<prob_c1, prob_c2, ..., prob_cn>
+        for key, scores in self.instance_map.items():
+            # self.patient_col.load_prediction()
+            breakpoint()
         return self.instance_map.keys(), self.instance_map.values()
 
     def reset(self):
         """
             Clear the map.
+            todo - clear the patient collection
         Returns:
             None
         """
         self._instance_map.clear()
+        self.patient_col.flush_df()
+
+    def _fetch_prediction(self):
+        """
+            -todo Consider move to the multi_instance_meter
+        Returns:
+
+        """
+        patch_score = self.meter_dict['multi_instance_meter'].value()
+        patch_label_collection = {
+                        key: [score_array.argmax(dim=1) for score_array in score_array_list]
+                        for (key, score_array_list) in patch_score.items()
+        }
+        patch_label_prediction = {
+            key: max(col)
+            for (key, col) in patch_label_collection.items()
+        }
+        pred_labels = list(patch_label_prediction.values())
+        pred_labels_str = [self.class_names[x] for x in pred_labels]
+        filenames = list(patch_label_prediction.keys())
+        self.patient_col.load_prediction(pred_labels_str, filenames)
