@@ -10,8 +10,9 @@ from torch.optim.optimizer import Optimizer
 import torch.nn as nn
 # from torch.utils.data import Dataset as TorchDataSet
 from torchnet.meter.meter import Meter
-import logging
-logging.basicConfig(level=logging.DEBUG)
+from pycodelib.debug import Debugger
+debugger = Debugger(__name__)
+debugger.level = None
 
 
 class AbstractIteratorBuilder(ABC):
@@ -110,7 +111,9 @@ class AbstractEngine(Callable):
             loss
             prediction
         """
+        debugger.log(type(data_batch), len(data_batch))
         loss, pred = self.model_eval(data_batch)
+        debugger.log(loss, pred)
         return loss, pred
 
     def __init__(self,
@@ -140,6 +143,7 @@ class AbstractEngine(Callable):
                     "on_end_epoch": self.on_end_epoch,      # train exclusive - usually test is invoked here
                     "on_end": self.on_end,                  # end of the procedure
         })
+        self.engine.hooks = self.hooks
         # The device which host the model and all variables.
         self.device: torch.device = device
         # The neural network model.
@@ -151,7 +155,7 @@ class AbstractEngine(Callable):
         # Empty Meter storage.
         self.meter_dict: Dict = dict()
 
-    def process(self, maxepoch: int, optimizer: Optimizer):
+    def process(self, maxepoch: int, optimizer: Optimizer, batch_size: int = 4, num_workers: int = 0):
         """
             The exposed interface to user, which is an encapsulation of engine.train, where the 1st callable
              parameter of engine.train is self (i.e. defined by __call__)
@@ -162,8 +166,12 @@ class AbstractEngine(Callable):
         Returns:
 
         """
+        debugger.log("process start")
         self._maxepoch = maxepoch
-        self.engine.train(self, self.iterator_getter.get_iterator(mode=True, shuffle=True),
+        self.engine.train(self.__call__, self.iterator_getter.get_iterator(mode=True,
+                                                                           shuffle=True,
+                                                                           batch_size=batch_size,
+                                                                           num_workers=num_workers),
                           maxepoch=self._maxepoch, optimizer=optimizer)
 
     @abstractmethod

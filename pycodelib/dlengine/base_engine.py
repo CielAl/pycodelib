@@ -9,9 +9,8 @@ import torch
 import torch.nn as nn
 from torchnet.meter import AverageValueMeter, ClassErrorMeter, ConfusionMeter, AUCMeter
 from tqdm import tqdm
-import logging
+from pycodelib.debug import Debugger
 
-logging.basicConfig(level=logging.debug)
 softmax: Callable = nn.Softmax(dim=1)
 
 
@@ -23,7 +22,7 @@ class SkinEngine(AbstractEngine):
                  model: nn.Module,
                  loss: nn.Module,
                  iterator_getter: AbstractIteratorBuilder,
-                 val_phases: Sequence[str, ...],
+                 val_phases: Sequence[str],
                  class_names: List,
                  patient_col: SheetCollection):
         super().__init__(device, model, loss, iterator_getter)
@@ -39,6 +38,9 @@ class SkinEngine(AbstractEngine):
         self.add_meter('multi_instance_meter', MultiInstanceMeter(self.patient_col))
         self.add_meter('auc_meter', AUCMeter())
 
+        self.debugger = Debugger(__name__)
+        self.debugger.level = -1
+        
     def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
@@ -65,7 +67,10 @@ class SkinEngine(AbstractEngine):
         Returns:
 
         """
-        logging.info(f"Start...")
+
+        # if test mode: need to load the progress bar here
+        if not state['train']:
+            state['iterator'] = tqdm(state['iterator'])
 
     def on_end(self, state: Dict[str, Any]):
         """
@@ -77,7 +82,6 @@ class SkinEngine(AbstractEngine):
             None
         """
         torch.cuda.empty_cache()
-        logging.debug(f"End...")
 
     def on_sample(self, state: Dict[str, Any]):
         """
@@ -127,6 +131,7 @@ class SkinEngine(AbstractEngine):
 
         """
         state['train'] = False
+        self.meter_dict['multi_instance_meter'].value()
         self.engine.test(self, self.iterator_getter.get_iterator(mode=False, shuffle=False))
 
     def _reset_meters(self):
@@ -153,26 +158,6 @@ class SkinEngine(AbstractEngine):
         print(self.meter_dict['conf_meter'].value())
         self._fetch_prediction()
 
-    def _fetch_prediction(self):
-        """
-            -todo Consider move to the multi_instance_meter
-        Returns:
-
-        """
-        patch_score = self.meter_dict['multi_instance_meter'].value()
-        patch_label_collection = {
-                        key: [score_array.argmax(dim=1) for score_array in score_array_list]
-                        for (key, score_array_list) in patch_score.items()
-        }
-        patch_label_prediction = {
-            key: max(col)
-            for (key, col) in patch_label_collection.items()
-        }
-        pred_labels = list(patch_label_prediction.values())
-        pred_labels_str = [self.class_names[x] for x in pred_labels]
-        filenames = list(patch_label_prediction.keys())
-        self.patient_col.load_prediction(pred_labels_str, filenames)
-
     def on_forward(self, state: Dict[str, Any]):
         """
             On forward. Perform measurements for both train and test.
@@ -187,15 +172,17 @@ class SkinEngine(AbstractEngine):
 
         # pred_data as the output score. Shape: N samples * M classes.
         pred_data: torch.Tensor = state['output'].data
-        loss_scalar: torch.Tensor = state['loss'].data  # .item().  Unify the behavior to pred_data
-
+        loss_scalar: torch.Tensor = state['loss'].data.detach().cpu().numpy()  # .item().
+                                                                        #  Unify the behavior to pred_data
         # retrieve input data
         img_new, label, img, filename, *rest = state['sample']
         label: torch.LongTensor = label.type("torch.LongTensor")
 
         # Add Loss Measurements per batch
+        # breakpoint()
         self.meter_dict['loss_meter'].add(loss_scalar)
         # Add accuracy (patch) per batch
+        # todo check length of label
         self.meter_dict['patch_accuracy_meter'].add(pred_data, label)
 
         # If 1-d vector (in case of batch-of-one), adding leading singleton dim.
