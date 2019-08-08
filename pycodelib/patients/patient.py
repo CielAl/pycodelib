@@ -4,10 +4,10 @@ import numpy as np
 import re
 from typing import Sequence, List, Dict, Any, Tuple, Set
 from abc import ABC, abstractmethod
-
+from tqdm import tqdm
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 
 
 class PatientCollection(ABC):
@@ -15,6 +15,7 @@ class PatientCollection(ABC):
     def __init__(self):
         self.patient_ground_truth = None
         self.patient_prediction = None
+        self.patient_score = None
         self._class_list = None
 
     @property
@@ -105,18 +106,16 @@ class SheetCollection(PatientCollection):
         return entry
 
     @staticmethod
-    def insert_entry(dataframe: pd.DataFrame, patient_id, entry: Dict[str, Any]):
-        entry_array = np.asarray(list(entry.values()))
-        logging.debug(entry_array)
+    def insert_data(dataframe: pd.DataFrame, patient_id, data: Any):
         try:
             existed = dataframe.loc[patient_id]
         except KeyError:
-            existed = np.zeros_like(entry_array)
-        entry_array += existed
-        dataframe.loc[patient_id] = entry_array
+            existed = np.zeros_like(data)
+        data_new = data + existed
+        dataframe.loc[patient_id] = data_new
 
     def _write_gt(self):
-        for file in self.file_list:
+        for file in tqdm(self.file_list):
             slide_id, class_name_full = self.slide_name(file)
             patient_id = self.slide2patient(slide_id)
             self.add_slides_to_patient(patient_id, os.path.basename(file))
@@ -125,11 +124,13 @@ class SheetCollection(PatientCollection):
             entry = self.entry(class_name_short)
             logging.debug(f"{entry}{patient_id}. Slide:{slide_id}")
             logging.debug(f"{self.patient_ground_truth}")
-            type(self).insert_entry(self.patient_ground_truth, patient_id, entry)
+            entry_array = np.asarray(list(entry.values()))
+            type(self).insert_data(self.patient_ground_truth, patient_id, entry_array)
 
     def build_patient_record(self, columns: Sequence[str] = None):
         self.patient_ground_truth = pd.DataFrame(columns=columns)
         self.patient_prediction = pd.DataFrame(columns=columns)
+        self.patient_score = pd.DataFrame(columns=columns)
 
     def load_patient_sheet(self, sheet_name: str):
         patient_sheet = pd.read_excel(sheet_name)
@@ -156,16 +157,25 @@ class SheetCollection(PatientCollection):
     def file_list(self):
         return self._file_list
 
+    def flush_df(self, df_name: str):
+        getattr(self, df_name).drop(getattr(self, df_name).index, inplace=True)
+
+    def load_score(self, scores_all_category: Sequence[Sequence[float]], filenames: Sequence[str], flush: bool = True):
+        self.load_data('patient_score', scores_all_category, filenames, flush)
+
     def load_prediction(self, pred_class_names: Sequence[str], filenames: Sequence[str], flush: bool = True):
-        assert self.patient_prediction.size is not None, f"Prediction not initialized"
+        entry_list: List[Dict[str, int]] = [self.entry(pred) for pred in pred_class_names]
+        entry_array = [np.asarray(list(entry.values())) for entry in entry_list]
+        self.load_data('patient_prediction', entry_array, filenames, flush)
+
+    def load_data(self, table_name: str, data_list: Sequence, filenames: Sequence[str], flush: bool = True):
         if flush:
-            self.patient_prediction.drop(self.patient_prediction.index, inplace=True)
+            self.flush_df(table_name)
         file_basename_list: List[str] = [os.path.basename(f) for f in filenames]
         slide_id_list: List[str] = [self.slide_name(f)[0] for f in file_basename_list]
-        entry_list: List[Dict[str, int]] = [self.entry(pred) for pred in pred_class_names]
-        for (slide_id, entry) in zip(slide_id_list, entry_list):
-            patient_id = self.slide2patient(slide_id)
-            self.insert_entry(self.patient_prediction, patient_id, entry)
+        patient_id_list: List = [self.slide2patient(slide_id) for slide_id in slide_id_list]
+        for (patient_id, data) in zip(patient_id_list, data_list):
+            self.insert_data(getattr(self, table_name), patient_id, data)
 
     # only perform evaluation. manual loading of prediction required
     def prediction(self, target_column: str) -> Tuple[pd.Series, ...]:
@@ -176,7 +186,6 @@ class SheetCollection(PatientCollection):
         assert ground_truth.index is pred.index, f'Index not Matched'
         return pred, ground_truth
 
-    @abstractmethod
     def evaluate(self, **kwargs):
         ...
 
@@ -184,4 +193,4 @@ class SheetCollection(PatientCollection):
 class SkinCollection(SheetCollection):
 
     def evaluate(self, **kwargs):
-        ...
+        raise not NotImplementedError()
