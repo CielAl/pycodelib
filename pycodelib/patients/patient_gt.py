@@ -5,7 +5,7 @@ import re
 from typing import Sequence, List, Dict, Tuple, Set
 from abc import abstractmethod
 from tqdm import tqdm
-from . import PandasRecord
+from .skeletal import PandasRecord
 import logging
 
 logging.basicConfig(level=logging.WARNING)
@@ -62,8 +62,8 @@ class SheetCollection(PatientSlideCollection):
         super().__init__()
         if class_list is None:
             class_list = type(self)._DEFAULT_CLASS
+        self._class_list: np.ndarray = np.asarray(class_list)
         self._patient2slides_dict: Dict[str, Set[str, ...]] = dict()
-        self._class_list: Sequence[str] = np.asarray(class_list)
         self.patient_sheet = None
         self._file_list = file_list
         self.load_ground_truth(sheet_name, class_list)
