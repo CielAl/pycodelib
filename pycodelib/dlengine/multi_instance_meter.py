@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import numbers
 from torchnet.meter.meter import Meter
-from pycodelib.patients import SheetCollection
+from pycodelib.patients import SheetCollection, CascadedPred
 import pandas as pd
 import logging
 logger = logging.getLogger(__name__)
@@ -23,24 +23,38 @@ class MultiInstanceMeter(Meter):
         return self._instance_map
 
     @property
-    def patient_col(self) -> SheetCollection:
+    def patient_info(self) -> SheetCollection:
         """
         Returns:
             patient_col
         """
-        return self._patient_col
+        return self._patient_info
 
-    def __init__(self, patient_col: SheetCollection, class_id_mapping: Sequence[int]):
+    @property
+    def patient_pred(self) -> CascadedPred:
+        return self.patient_pred
+
+    def __init__(self,
+                 patient_info: SheetCollection,
+                 patient_pred: CascadedPred,
+                 positive_class: int = 1):
         """
             Constructor.
         Args:
-            patient_col: The SheetCollection of Patient Table.
+            patient_info: The SheetCollection of Patient Table.
         """
         super().__init__()
         self._instance_map: Dict[str, Any] = dict()
-        self._patient_col: SheetCollection = patient_col
-        self.class_id_mapping = np.asarray(class_id_mapping).astype(np.int64)
-        self.score_storage = pd.DataFrame()
+        self._patient_info: SheetCollection = patient_info
+        self._patient_pred: CascadedPred = patient_pred
+
+    @classmethod
+    def build(cls,
+              patient_info: SheetCollection,
+              class_list: Sequence,
+              partition: Sequence[Sequence[int]]):
+        patient_pred = CascadedPred(patient_info, class_list=class_list, partition=partition)
+        return cls(patient_info=patient_info, patient_pred=patient_pred)
 
     @staticmethod
     def vectorized_obj(obj_in: Any, scalar_type: type, at_least_1d=False, err_msg: str = ""):
@@ -126,7 +140,8 @@ class MultiInstanceMeter(Meter):
         scores_all_category: List = [np.asarray(scores_per_roi).mean(axis=0)
                                      for scores_per_roi in scores_all_category_roi_collection]
         # class name
-        self.patient_col.load_score(scores_all_category, filenames, flush=True)
+        breakpoint()
+        self.patient_pred.load_score(scores_all_category, filenames, flush=True)
         return self.instance_map.keys(), self.instance_map.values()
 
     def reset(self):

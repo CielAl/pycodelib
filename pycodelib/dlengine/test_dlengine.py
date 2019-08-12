@@ -31,7 +31,8 @@ device = torch.device('cuda:0')
 loss = nn.CrossEntropyLoss()
 optimizer = Adam(model.parameters())
 engine = SkinEngine(device=device, model=model, loss=loss, iterator_getter=getter, val_phases=['train', 'val'],
-                    patient_col=patient_table, class_grouping=[0, 2])
+                    patient_col=patient_table, sub_class_list=['No Path', 'SCC'],
+                    class_partition=[[0], [2, 3]])
 print('start engine')
 if __name__ == '__main__':
     engine.process(maxepoch=1, optimizer=optimizer, num_workers=12)

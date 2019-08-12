@@ -3,7 +3,7 @@
 """
 from .skeletal import AbstractEngine, AbstractIteratorBuilder
 from .multi_instance_meter import MultiInstanceMeter
-from pycodelib.patients import SheetCollection
+from pycodelib.patients import SheetCollection, CascadedPred
 from typing import Tuple, Dict, Any, Sequence, List, Callable, Union
 import torch
 import torch.nn as nn
@@ -25,24 +25,32 @@ class SkinEngine(AbstractEngine):
                  iterator_getter: AbstractIteratorBuilder,
                  val_phases: Sequence[str],
                  patient_col: SheetCollection,
-                 class_grouping: Sequence[Union[int, Sequence[int]]]):
+                 sub_class_list: Sequence,
+                 class_partition: Sequence[Union[int, Sequence[int]]]):
 
         super().__init__(device, model, loss, iterator_getter)
         self.val_phases: Sequence[str] = val_phases
-        self.patient_col = patient_col
-        self.class_grouping: np.ndarray = np.asarray(class_grouping)
 
-        self.num_classes: int = self.class_grouping.size
-        # self.class_names: np.ndarray = np.asarray(patient_col.class_list)[self.class_mapping_to_super]
+        self.patient_info = patient_col
+        self.sub_class_list = sub_class_list
+        self.class_partition: np.ndarray = np.asarray(class_partition)
+        self.patient_pred = CascadedPred(self.patient_info,
+                                         class_list=sub_class_list,
+                                         partition=self.class_partition)
+        self.num_classes: int = self.class_partition.size
+
         self.membership = None  # todo - EM
 
+        # meters
         self.add_meter('patch_accuracy_meter', ClassErrorMeter(accuracy=True))
         self.add_meter('conf_meter', ConfusionMeter(self.num_classes, normalized=False))
         self.add_meter('loss_meter', AverageValueMeter())
-        self.add_meter('multi_instance_meter', MultiInstanceMeter(self.patient_col, self.class_grouping))
+        self.add_meter('multi_instance_meter', MultiInstanceMeter(self.patient_info, self.patient_pred))
         self.add_meter('auc_meter', AUCMeter())
 
+        # debug
         self.debugger = Debugger(__name__)
+        # explicit printing
         self.debugger.level = -1
         
     def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -135,6 +143,7 @@ class SkinEngine(AbstractEngine):
 
         """
         state['train'] = False
+        # todo testing the value() breakpoints
         self.meter_dict['multi_instance_meter'].value()
         self.engine.test(self, self.iterator_getter.get_iterator(mode=False, shuffle=False))
 
@@ -181,10 +190,13 @@ class SkinEngine(AbstractEngine):
         # retrieve input data
         img_new, label, img, filename, *rest = state['sample']
         label: torch.LongTensor = label.type("torch.LongTensor")
-        assert self.class_grouping.min() <= label.max() <= self.class_grouping.max() \
-               and \
-               self.class_grouping.min() <= label.min() <= self.class_grouping.max(),   \
-            f"batch_label exceed range {(label.min(), label.max())}. Expected in {self.class_grouping}"
+
+        part_min = min([min(x) for x in self.class_partition])
+        part_max = max([max(x) for x in self.class_partition])
+        assert part_min <= label.max() <= part_max \
+            and \
+            part_min <= label.min() <= part_max,   \
+            f"batch_label exceed range {(label.min(), label.max())}. Expected in {self.class_partition}"
 
         # Add Loss Measurements per batch
         # breakpoint()

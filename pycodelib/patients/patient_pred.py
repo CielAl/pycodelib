@@ -6,6 +6,8 @@ import pandas as pd
 
 
 class PatientPred(PandasRecord):
+    NAME_SCORE: str = "score"
+    NAME_PRED: str = "prediction"
 
     def __init__(self,
                  patient_ground_truth: PatientSlideCollection,
@@ -14,8 +16,8 @@ class PatientPred(PandasRecord):
         super().__init__()
         self._patient_ground_truth = patient_ground_truth
         self._class_list: np.ndarray = np.asarray(class_list)
-        self.build_df('score', self._class_list)
-        self.build_df('prediction', self._class_list)
+        self.build_df(PatientPred.NAME_SCORE, self._class_list)
+        self.build_df(PatientPred.NAME_PRED, self._class_list)
 
     @property
     def patient_info(self):
@@ -30,7 +32,7 @@ class PatientPred(PandasRecord):
                                                     )
 
     def load_score(self, scores_all_category: Sequence[Sequence[float]], filenames: Sequence[str], flush: bool):
-        self.load_data('score', scores_all_category, filenames, flush)
+        self.load_data(PatientPred.NAME_SCORE, scores_all_category, filenames, flush)
 
     def entry(self, class_value: str) -> Dict[str, int]:
         assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
@@ -41,7 +43,7 @@ class PatientPred(PandasRecord):
         # todo entry from partition
         entry_list: List[Dict[str, int]] = [self.entry(pred) for pred in pred_class_names]
         entry_array = [np.asarray(list(entry.values())) for entry in entry_list]
-        self.load_data('prediction', entry_array, filenames, flush)
+        self.load_data(PatientPred.NAME_PRED, entry_array, filenames, flush)
 
     def get_ground_truth(self, patient_ids):
         raise NotImplementedError
@@ -50,13 +52,13 @@ class PatientPred(PandasRecord):
 class CascadedPred(PatientPred):
 
     @property
-    def partition(self) -> List[List[int]]:
+    def partition(self) -> Sequence[Sequence[int]]:
         return self._partition
 
     def __init__(self,
                  patient_ground_truth: PatientSlideCollection,
-                 class_list: List,
-                 partition: List[List[int]],
+                 class_list: Sequence,
+                 partition: Sequence[Sequence[int]],
                  ):
         super().__init__(patient_ground_truth, class_list)
         self. _partition = partition
