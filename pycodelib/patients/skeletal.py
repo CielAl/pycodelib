@@ -15,8 +15,9 @@ class PandasRecord(ABC):
         self._class_list = None  # placeholders
 
     def build_df(self, table_name: str, columns: Sequence[str] = None):
-        if not hasattr(self, '__table_names'):
-            self.__table_names = set()
+        # do not test hasattr on __var due to the name-change
+        if self.__table_names is None:
+            self.__table_names: Set[str] = set()
         if table_name not in self.__table_names:
             self.__table_names.add(table_name)
         setattr(self, table_name, pd.DataFrame(columns=columns))
