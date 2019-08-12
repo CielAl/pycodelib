@@ -2,7 +2,7 @@ from pycodelib.dlengine import SkinEngine
 from torchvision.models.densenet import DenseNet
 import torch
 import torch.nn as nn
-from pycodelib.patients.patient import *
+from pycodelib.patients.patient_gt import *
 from torch.optim import Adam
 import glob
 from torchvision import transforms
@@ -31,8 +31,9 @@ device = torch.device('cuda:0')
 loss = nn.CrossEntropyLoss()
 optimizer = Adam(model.parameters())
 engine = SkinEngine(device=device, model=model, loss=loss, iterator_getter=getter, val_phases=['train', 'val'],
-                    class_names=['No path', 'SCC'], patient_col=patient_table)
+                    patient_col=patient_table, class_grouping=[0, 2])
 print('start engine')
-engine.process(maxepoch=1, optimizer=optimizer, num_workers=12)
+if __name__ == '__main__':
+    engine.process(maxepoch=1, optimizer=optimizer, num_workers=12)
 
 

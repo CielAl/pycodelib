@@ -4,6 +4,7 @@ import numpy as np
 import numbers
 from torchnet.meter.meter import Meter
 from pycodelib.patients import SheetCollection
+import pandas as pd
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -14,7 +15,7 @@ class MultiInstanceMeter(Meter):
         Bag of scores by groups.
     """
     @property
-    def instance_map(self) -> Dict[Hashable, Any]:
+    def instance_map(self) -> Dict[str, Any]:
         """
         Returns:
             instance_map
@@ -29,15 +30,17 @@ class MultiInstanceMeter(Meter):
         """
         return self._patient_col
 
-    def __init__(self, patient_col: SheetCollection):
+    def __init__(self, patient_col: SheetCollection, class_id_mapping: Sequence[int]):
         """
             Constructor.
         Args:
             patient_col: The SheetCollection of Patient Table.
         """
         super().__init__()
-        self._instance_map: Dict[Hashable, Any] = dict()
+        self._instance_map: Dict[str, Any] = dict()
         self._patient_col: SheetCollection = patient_col
+        self.class_id_mapping = np.asarray(class_id_mapping).astype(np.int64)
+        self.score_storage = pd.DataFrame()
 
     @staticmethod
     def vectorized_obj(obj_in: Any, scalar_type: type, at_least_1d=False, err_msg: str = ""):
@@ -116,9 +119,14 @@ class MultiInstanceMeter(Meter):
             todo
         """
         # for each v: List of array<prob_c1, prob_c2, ..., prob_cn>
-        for key, scores in self.instance_map.items():
-            # self.patient_col.load_prediction()
-            breakpoint()
+        # values: List of v
+        filenames = list(self.instance_map.keys())
+        scores_all_category_roi_collection = list(self.instance_map.values())
+        # reduce from patch to ROI
+        scores_all_category: List = [np.asarray(scores_per_roi).mean(axis=0)
+                                     for scores_per_roi in scores_all_category_roi_collection]
+        # class name
+        self.patient_col.load_score(scores_all_category, filenames, flush=True)
         return self.instance_map.keys(), self.instance_map.values()
 
     def reset(self):
@@ -129,13 +137,17 @@ class MultiInstanceMeter(Meter):
             None
         """
         self._instance_map.clear()
-        self.patient_col.flush_df()
 
+
+
+'''
     def _fetch_prediction(self):
         """
             -todo Consider move to the multi_instance_meter
         Returns:
 
+        """
+        return
         """
         patch_score = self.meter_dict['multi_instance_meter'].value()
         patch_label_collection = {
@@ -150,3 +162,5 @@ class MultiInstanceMeter(Meter):
         pred_labels_str = [self.class_names[x] for x in pred_labels]
         filenames = list(patch_label_prediction.keys())
         self.patient_col.load_prediction(pred_labels_str, filenames)
+        """
+'''

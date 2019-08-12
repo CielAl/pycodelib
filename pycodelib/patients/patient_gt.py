@@ -2,65 +2,78 @@ import os
 import pandas as pd
 import numpy as np
 import re
-from typing import Sequence, List, Dict, Any, Tuple, Set
-from abc import ABC, abstractmethod
+from typing import Sequence, List, Dict, Tuple, Set
+from abc import abstractmethod
 from tqdm import tqdm
+from . import PandasRecord
 import logging
 
 logging.basicConfig(level=logging.WARNING)
 
 
-class PatientCollection(ABC):
+class PatientSlideCollection(PandasRecord):
 
     def __init__(self):
+        super().__init__()
         self.patient_ground_truth = None
         self.patient_prediction = None
         self.patient_score = None
-        self._class_list = None
 
-    @property
     @abstractmethod
-    def class_list(self):
+    def patient2slides(self, patient_id):
         ...
 
     @abstractmethod
-    def load_prediction(self, **kwargs):
+    def slide2patient(self, slide_id):
         ...
 
     @abstractmethod
     def load_ground_truth(self, **kwargs):
         ...
 
+    def entry(self, class_value: str) -> Dict[str, int]:
+        assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
+        entry: Dict[str, int] = {c: 1 if c == class_value else 0 for c in self.class_list}
+        return entry
+
+    @staticmethod
     @abstractmethod
-    def build_patient_record(self, **kwargs):
+    def key_to_row(sheet_col, filenames):
         ...
 
-    @abstractmethod
-    def evaluate(self, **kwargs):
-        ...
+    @staticmethod
+    def load_data_by_patient(patient_src_record,
+                             target_data_frame: pd.DataFrame,
+                             data_list: Sequence,
+                             filenames: Sequence[str],
+                             flush: bool):
+        if flush:
+            type(patient_src_record).flush_df(target_data_frame)
+        patient_id_list: List = SheetCollection.key_to_row(patient_src_record, filenames)
+        for (patient_id, data) in zip(patient_id_list, data_list):
+            PandasRecord.insert_data(target_data_frame, patient_id, data)
 
 
-class SheetCollection(PatientCollection):
+class SheetCollection(PatientSlideCollection):
     _DEFAULT_CLASS = ['No Path', 'BCC', 'Situ', 'Invasive']
-    _SLIDE_SEPARATOR: str = '_'
-
-    @property
-    def patient2slides(self):
-        return self._patient2slides
+    SLIDE_SEPARATOR: str = '_'
 
     def __init__(self, file_list, sheet_name: str, class_list: Sequence[str] = None):
         super().__init__()
         if class_list is None:
             class_list = type(self)._DEFAULT_CLASS
-        self._patient2slides: Dict[str, Set[str, ...]] = dict()
-        self._class_list: Sequence[str] = class_list
+        self._patient2slides_dict: Dict[str, Set[str, ...]] = dict()
+        self._class_list: Sequence[str] = np.asarray(class_list)
         self.patient_sheet = None
         self._file_list = file_list
         self.load_ground_truth(sheet_name, class_list)
 
+    def patient2slides(self, patient_id):
+        return self._patient2slides_dict.get(patient_id, None)
+
     def add_slides_to_patient(self, patient_id: str, slide_id: str):
-        self.patient2slides[patient_id] = self.patient2slides.get(patient_id, set())
-        self.patient2slides[patient_id].add(slide_id)
+        self._patient2slides_dict[patient_id] = self._patient2slides_dict.get(patient_id, set())
+        self._patient2slides_dict[patient_id].add(slide_id)
 
     def parse_class_name_short(self, roi_class: str) -> str:
         parsed = [class_name for class_name in self.class_list
@@ -70,15 +83,19 @@ class SheetCollection(PatientCollection):
         return parsed[0]
 
     def slide_name(self, file: str) -> Tuple[str, str]:
+        return type(self).slide_name_static(self, file)
+
+    @staticmethod
+    def slide_name_static(sheet_collection, file: str) -> Tuple[str, str]:
         basename = os.path.basename(file)
-        name_components: List[str] = basename.split(type(self)._SLIDE_SEPARATOR)
+        name_components: List[str] = basename.split(type(sheet_collection).SLIDE_SEPARATOR)
         # nonzero returns a tuple of array
         index_match_array = np.asarray(
             [
                 np.asarray(
                     [
                         re.search(class_name, component, re.IGNORECASE) is not None
-                        for class_name in self.class_list
+                        for class_name in sheet_collection.class_list
                     ]).any()
                 for component in name_components
             ]
@@ -90,8 +107,12 @@ class SheetCollection(PatientCollection):
         return slide_id, name_components[index_match]
 
     def slide2patient(self, slide_id: str) -> str:
-        patient_id_list = self.patient_sheet["PID"] \
-            .where(self.patient_sheet['SLIDE_SUFFIX'] == slide_id) \
+        return type(self).slide2patient_static(self, slide_id)
+
+    @staticmethod
+    def slide2patient_static(sheet_collection, slide_id):
+        patient_id_list = sheet_collection.patient_sheet["PID"] \
+            .where(sheet_collection.patient_sheet['SLIDE_SUFFIX'] == slide_id) \
             .dropna() \
             .to_numpy()
 
@@ -99,20 +120,6 @@ class SheetCollection(PatientCollection):
             f"{slide_id}{patient_id_list}"
         patient_id = patient_id_list[0]
         return patient_id
-
-    def entry(self, class_value: str) -> Dict[str, int]:
-        assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
-        entry: Dict[str, int] = {c: 1 if c == class_value else 0 for c in self.class_list}
-        return entry
-
-    @staticmethod
-    def insert_data(dataframe: pd.DataFrame, patient_id, data: Any):
-        try:
-            existed = dataframe.loc[patient_id]
-        except KeyError:
-            existed = np.zeros_like(data)
-        data_new = data + existed
-        dataframe.loc[patient_id] = data_new
 
     def _write_gt(self):
         for file in tqdm(self.file_list):
@@ -122,15 +129,10 @@ class SheetCollection(PatientCollection):
             class_name_short = self.parse_class_name_short(class_name_full)
             assert class_name_short in self.class_list, f'Class not in the list:{class_name_short}'
             entry = self.entry(class_name_short)
-            logging.debug(f"{entry}{patient_id}. Slide:{slide_id}")
-            logging.debug(f"{self.patient_ground_truth}")
+            # logging.debug(f"{entry}{patient_id}. Slide:{slide_id}")
+            # logging.debug(f"{self.patient_ground_truth}")
             entry_array = np.asarray(list(entry.values()))
-            type(self).insert_data(self.patient_ground_truth, patient_id, entry_array)
-
-    def build_patient_record(self, columns: Sequence[str] = None):
-        self.patient_ground_truth = pd.DataFrame(columns=columns)
-        self.patient_prediction = pd.DataFrame(columns=columns)
-        self.patient_score = pd.DataFrame(columns=columns)
+            PandasRecord.insert_data(self.patient_ground_truth, patient_id, entry_array)
 
     def load_patient_sheet(self, sheet_name: str):
         patient_sheet = pd.read_excel(sheet_name)
@@ -145,7 +147,7 @@ class SheetCollection(PatientCollection):
     def load_ground_truth(self, sheet_name: str, class_list: Sequence[str]):
         assert hasattr(self, 'patient2slides')
         self.load_patient_sheet(sheet_name)
-        self.build_patient_record(columns=class_list)
+        self.build_df('patient_ground_truth', columns=class_list)
         self._write_gt()
 
     # override
@@ -157,26 +159,20 @@ class SheetCollection(PatientCollection):
     def file_list(self):
         return self._file_list
 
-    def flush_df(self, df_name: str):
-        getattr(self, df_name).drop(getattr(self, df_name).index, inplace=True)
+    def load_data(self, table_name: str, data_list: Sequence, filenames: Sequence[str], flush: bool):
+        PatientSlideCollection.load_data_by_patient(self, self.get_df(table_name), data_list, filenames, flush)
 
-    def load_score(self, scores_all_category: Sequence[Sequence[float]], filenames: Sequence[str], flush: bool = True):
-        self.load_data('patient_score', scores_all_category, filenames, flush)
-
-    def load_prediction(self, pred_class_names: Sequence[str], filenames: Sequence[str], flush: bool = True):
-        entry_list: List[Dict[str, int]] = [self.entry(pred) for pred in pred_class_names]
-        entry_array = [np.asarray(list(entry.values())) for entry in entry_list]
-        self.load_data('patient_prediction', entry_array, filenames, flush)
-
-    def load_data(self, table_name: str, data_list: Sequence, filenames: Sequence[str], flush: bool = True):
-        if flush:
-            self.flush_df(table_name)
+    @staticmethod
+    def key_to_row(sheet_col, filenames):
         file_basename_list: List[str] = [os.path.basename(f) for f in filenames]
-        slide_id_list: List[str] = [self.slide_name(f)[0] for f in file_basename_list]
-        patient_id_list: List = [self.slide2patient(slide_id) for slide_id in slide_id_list]
-        for (patient_id, data) in zip(patient_id_list, data_list):
-            self.insert_data(getattr(self, table_name), patient_id, data)
+        slide_id_list: List[str] = [SheetCollection.slide_name_static(sheet_col, f)[0]
+                                    for f in file_basename_list]
+        patient_id_list: List = [SheetCollection.slide2patient_static(sheet_col, slide_id)
+                                 for slide_id in slide_id_list]
+        return patient_id_list
 
+
+"""
     # only perform evaluation. manual loading of prediction required
     def prediction(self, target_column: str) -> Tuple[pd.Series, ...]:
         assert self.patient_prediction.size > 0, f"Prediction not loaded"
@@ -190,7 +186,10 @@ class SheetCollection(PatientCollection):
         ...
 
 
-class SkinCollection(SheetCollection):
 
-    def evaluate(self, **kwargs):
-        raise not NotImplementedError()
+        file_basename_list: List[str] = [os.path.basename(f) for f in filenames]
+        slide_id_list: List[str] = [SheetCollection.slide_name_static(sheet_col, f)[0]
+                                    for f in file_basename_list]
+        patient_id_list: List = [SheetCollection.slide2patient_static(sheet_col, slide_id)
+                                 for slide_id in slide_id_list]
+"""
