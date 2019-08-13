@@ -32,12 +32,22 @@ class MultiInstanceMeter(Meter):
 
     @property
     def patient_pred(self) -> CascadedPred:
-        return self.patient_pred
+        return self._patient_pred
+
+    def default_label_collate(self, label_occurrence_in: np.ndarray):
+        """
+            Ensure the mutual exclusion
+        Returns:
+
+        """
+        label_occurrence = np.atleast_2d(label_occurrence_in)
+        # default [No Path, BCC, Situ, Invasive]. BCC+Situ = BCC. Invasive+Situ = Invasive
 
     def __init__(self,
                  patient_info: SheetCollection,
                  patient_pred: CascadedPred,
-                 positive_class: int = 1):
+                 positive_class: int = 1,
+                 multual_exclusion_collate=None):
         """
             Constructor.
         Args:
@@ -47,7 +57,8 @@ class MultiInstanceMeter(Meter):
         self._instance_map: Dict[str, Any] = dict()
         self._patient_info: SheetCollection = patient_info
         self._patient_pred: CascadedPred = patient_pred
-
+        if multual_exclusion_collate is None:
+            self.mutual_exclusion_collate = self.default_label_collate
     @classmethod
     def build(cls,
               patient_info: SheetCollection,
@@ -57,7 +68,7 @@ class MultiInstanceMeter(Meter):
         return cls(patient_info=patient_info, patient_pred=patient_pred)
 
     @staticmethod
-    def vectorized_obj(obj_in: Any, scalar_type: type, at_least_1d=False, err_msg: str = ""):
+    def vectorized_obj(obj_in: Any, scalar_type: type, at_least_1d=False, err_msg: str = "") -> np.ndarray:
         """
             Vectorize the input
         Args:
@@ -102,7 +113,7 @@ class MultiInstanceMeter(Meter):
         # breakpoint()
         keys = type(self).vectorized_obj(keys_in, Hashable, at_least_1d=False, err_msg=f"{type(keys_in)}")
         values = type(self).vectorized_obj(values_in, numbers.Number, at_least_1d=True, err_msg=f"{type(values_in)}")
-
+        values = values.astype(np.float64)
         # Now keys and values are numpy arrays.
         # Validate if the length agree.
         assert keys.shape[0] == values.shape[0], f"Length not agree. key={keys}|{len(keys)}." \
@@ -130,19 +141,30 @@ class MultiInstanceMeter(Meter):
         """
             todo Move the fetch_prediction here.
         Returns:
-            todo
+            todo: score and pred
         """
         # for each v: List of array<prob_c1, prob_c2, ..., prob_cn>
         # values: List of v
         filenames = list(self.instance_map.keys())
         scores_all_category_roi_collection = list(self.instance_map.values())
-        # reduce from patch to ROI
+        # reduce from patch to ROI by averaging. Note: for patient level there shall be
+        # one more level of averaging
         scores_all_category: List = [np.asarray(scores_per_roi).mean(axis=0)
                                      for scores_per_roi in scores_all_category_roi_collection]
         # class name
-        breakpoint()
-        self.patient_pred.load_score(scores_all_category, filenames, flush=True)
-        return self.instance_map.keys(), self.instance_map.values()
+        self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
+        score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
+        pred_scores_all_category = score_table.values.copy()
+        # add None (extra dim) in dims for broadcasting (divide a column),
+        # otherwise the [:, -1] returns a row vector and performs division on rows.
+        pred_scores_all_category[:, :-1] /= pred_scores_all_category[:, -1, None]
+        pred_scores_all_category = pred_scores_all_category[:, :-1]
+
+        true_label_table = self.patient_pred.get_ground_truth(score_table.index)
+        true_labels = true_label_table.values
+        rows = np.asarray(score_table.index)
+        columns = np.asarray(score_table.keys())
+        return pred_scores_all_category, true_labels, rows, columns
 
     def reset(self):
         """
