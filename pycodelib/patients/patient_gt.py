@@ -3,55 +3,12 @@ import pandas as pd
 import numpy as np
 import re
 from typing import Sequence, List, Dict, Tuple, Set
-from abc import abstractmethod
 from tqdm import tqdm
+from pycodelib.patients.skeletal import PatientSlideCollection
 from .skeletal import PandasRecord
 import logging
 
 logging.basicConfig(level=logging.WARNING)
-
-
-class PatientSlideCollection(PandasRecord):
-
-    def __init__(self):
-        super().__init__()
-        self.patient_ground_truth = None
-        self.patient_prediction = None
-        self.patient_score = None
-
-    @abstractmethod
-    def patient2slides(self, patient_id):
-        ...
-
-    @abstractmethod
-    def slide2patient(self, slide_id):
-        ...
-
-    @abstractmethod
-    def load_ground_truth(self, **kwargs):
-        ...
-
-    def entry(self, class_value: str) -> Dict[str, int]:
-        assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
-        entry: Dict[str, int] = {c: 1 if c == class_value else 0 for c in self.class_list}
-        return entry
-
-    @staticmethod
-    @abstractmethod
-    def key_to_row(sheet_col, filenames):
-        ...
-
-    @staticmethod
-    def load_data_by_patient(patient_src_record,
-                             target_data_frame: pd.DataFrame,
-                             data_list: Sequence,
-                             filenames: Sequence[str],
-                             flush: bool):
-        if flush:
-            type(patient_src_record).flush_df(target_data_frame)
-        patient_id_list: List = SheetCollection.key_to_row(patient_src_record, filenames)
-        for (patient_id, data) in zip(patient_id_list, data_list):
-            PandasRecord.insert_data(target_data_frame, patient_id, data)
 
 
 class SheetCollection(PatientSlideCollection):
@@ -171,7 +128,15 @@ class SheetCollection(PatientSlideCollection):
                                  for slide_id in slide_id_list]
         return patient_id_list
 
-
+    @staticmethod
+    def load_data_by_patient(patient_src_record, target_data_frame: pd.DataFrame, data_list: Sequence,
+                             filenames: Sequence[str], flush: bool):
+        if flush:
+            type(patient_src_record).flush_df(target_data_frame)
+        patient_id_list: List = SheetCollection.key_to_row(patient_src_record, filenames)
+        print(patient_id_list)
+        for (patient_id, data) in zip(patient_id_list, data_list):
+            PandasRecord.insert_data(target_data_frame, patient_id, data)
 """
     # only perform evaluation. manual loading of prediction required
     def prediction(self, target_column: str) -> Tuple[pd.Series, ...]:

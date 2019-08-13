@@ -23,14 +23,18 @@ class SkinEngine(AbstractEngine):
                  model: nn.Module,
                  loss: nn.Module,
                  iterator_getter: AbstractIteratorBuilder,
-                 val_phases: Sequence[str],
                  patient_col: SheetCollection,
                  sub_class_list: Sequence,
-                 class_partition: Sequence[Union[int, Sequence[int]]]):
+                 class_partition: Sequence[Union[int, Sequence[int]]],
+                 val_phases: Dict[bool, str] = None):
 
         super().__init__(device, model, loss, iterator_getter)
-        self.val_phases: Sequence[str] = val_phases
-
+        if val_phases is None:
+            val_phases = dict({True: "train", False: "val"})
+        self.val_phases: Dict[bool, str] = val_phases
+        assert set(self.val_phases.values()).issubset(AbstractEngine.PHASE_NAMES),\
+            f"Invalid Phase Names{self.val_phases}" \
+            f"Expected from {AbstractEngine.PHASE_NAMES}"
         self.patient_info = patient_col
         self.sub_class_list = sub_class_list
         self.class_partition: np.ndarray = np.asarray(class_partition)
@@ -93,6 +97,8 @@ class SkinEngine(AbstractEngine):
         Returns:
             None
         """
+        if not state['train']:
+            self._evaluation(state)
         torch.cuda.empty_cache()
 
     def on_sample(self, state: Dict[str, Any]):
@@ -142,14 +148,19 @@ class SkinEngine(AbstractEngine):
         Returns:
 
         """
+        self._evaluation(state)
         state['train'] = False
         # todo testing the value() breakpoints
-        self.meter_dict['multi_instance_meter'].value()
+        torch.cuda.empty_cache()
         self.engine.test(self, self.iterator_getter.get_iterator(mode=False, shuffle=False))
 
     def _reset_meters(self):
         for k, v in self.meter_dict.items():
             v.reset()
+
+    def phase_name(self, state):
+        phase = self.val_phases.get(state['train'], None)
+        return phase
 
     def _evaluation(self, state):
         """
@@ -162,14 +173,23 @@ class SkinEngine(AbstractEngine):
 
         """
         # todo test
-        ...
-        print('[Epoch %d] Testing Loss: %.4f (Accuracy: %.2f%%)' % (
-            state['epoch'],
-            self.meter_dict['loss_meter'].value()[0],
-            self.meter_dict['patch_accuracy_meter'].value()[0])
-        )
-        print(self.meter_dict['conf_meter'].value())
-        # todo self._fetch_prediction()
+        phase = self.phase_name(state)
+        if phase is None:
+            #  skip
+            return
+        scores_all_cate, labels_all_cate, row_names, col_names = self.meter_dict['multi_instance_meter'].value()
+
+        loss = self.meter_dict['loss_meter'].value()[0]
+        patch_acc = self.meter_dict['patch_accuracy_meter'].value()[0]
+        patch_auc = self.meter_dict['auc_meter'].value()[0]
+        patch_conf = self.meter_dict['conf_meter'].value()
+        basic_verbose = f"{phase} - [Epoch {state['epoch']}/{self._maxepoch}]. " \
+            f"Loss:= {loss:.5f} " \
+            f"Patch accuracy:= {patch_acc:.2f}  " \
+            f"Patch AUC:= {patch_auc:.2f}"
+        print(basic_verbose)
+        print(patch_conf)
+        breakpoint()
 
     def on_forward(self, state: Dict[str, Any]):
         """
@@ -199,7 +219,6 @@ class SkinEngine(AbstractEngine):
             f"batch_label exceed range {(label.min(), label.max())}. Expected in {self.class_partition}"
 
         # Add Loss Measurements per batch
-        # breakpoint()
         self.meter_dict['loss_meter'].add(loss_scalar)
         # Add accuracy (patch) per batch
         # todo check length of label

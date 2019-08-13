@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Set, Any
+from typing import Sequence, Set, Any, Dict
 import pandas as pd
 import numpy as np
 
@@ -14,13 +14,16 @@ class PandasRecord(ABC):
         self.__table_names: Set[str] = set()
         self._class_list = None  # placeholders
 
-    def build_df(self, table_name: str, columns: Sequence[str] = None):
+    def build_df(self, table_name: str, columns: Sequence[str] = None, meta: str = None):
         # do not test hasattr on __var due to the name-change
         if self.__table_names is None:
             self.__table_names: Set[str] = set()
         if table_name not in self.__table_names:
             self.__table_names.add(table_name)
-        setattr(self, table_name, pd.DataFrame(columns=columns))
+        df = pd.DataFrame(columns=columns)
+        if meta is not None:
+            df[meta] = None
+        setattr(self, table_name, df)
 
     def get_df(self, table_name) -> pd.DataFrame:
         if table_name not in self.__table_names:
@@ -53,3 +56,40 @@ class PandasRecord(ABC):
     @abstractmethod
     def load_data(self, table_name: str, data_list: Sequence, filenames: Sequence[str], flush: bool):
         ...
+
+
+class PatientSlideCollection(PandasRecord):
+
+    def __init__(self):
+        super().__init__()
+        self.patient_ground_truth = None
+        self.patient_prediction = None
+        self.patient_score = None
+
+    @abstractmethod
+    def patient2slides(self, patient_id):
+        ...
+
+    @abstractmethod
+    def slide2patient(self, slide_id):
+        ...
+
+    @abstractmethod
+    def load_ground_truth(self, **kwargs):
+        ...
+
+    def entry(self, class_value: str) -> Dict[str, int]:
+        assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
+        entry: Dict[str, int] = {c: 1 if c == class_value else 0 for c in self.class_list}
+        return entry
+
+    @staticmethod
+    @abstractmethod
+    def key_to_row(sheet_col, filenames):
+        raise NotImplementedError()
+
+    @staticmethod
+    @abstractmethod
+    def load_data_by_patient(patient_src_record, target_data_frame: pd.DataFrame, data_list: Sequence,
+                             filenames: Sequence[str], flush: bool):
+        raise NotImplementedError()

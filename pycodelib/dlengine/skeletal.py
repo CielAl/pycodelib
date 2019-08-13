@@ -1,7 +1,7 @@
 """
     Abstract classes.
 """
-from typing import Callable, Tuple, Dict, Any, List
+from typing import Callable, Tuple, Dict, Any, List, Set
 import torch
 from torch.utils.data import DataLoader
 from torchnet.engine import Engine
@@ -52,7 +52,7 @@ class AbstractEngine(Callable):
         The abstraction of training using engine. The class is Callable by itself, where its __call__ is defined to
         evaluate the model as serve as the "network/model" parameter of tnt/engine
     """
-
+    PHASE_NAMES: Set[str] = {'train', 'val'}
     @property
     def engine(self) -> Engine:
         """
@@ -168,10 +168,10 @@ class AbstractEngine(Callable):
         """
         debugger.log("process start")
         self._maxepoch = maxepoch
-        self.engine.train(self.__call__, self.iterator_getter.get_iterator(mode=True,
-                                                                           shuffle=True,
-                                                                           batch_size=batch_size,
-                                                                           num_workers=num_workers),
+        self.engine.train(self, self.iterator_getter.get_iterator(mode=True,
+                                                                  shuffle=True,
+                                                                  batch_size=batch_size,
+                                                                  num_workers=num_workers),
                           maxepoch=self._maxepoch, optimizer=optimizer)
 
     @abstractmethod

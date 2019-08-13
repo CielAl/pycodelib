@@ -1,6 +1,6 @@
 from . import PandasRecord
-from .patient_gt import PatientSlideCollection
-from typing import Sequence, List, Dict
+from pycodelib.patients import SheetCollection
+from typing import Sequence, List, Dict, Set
 import numpy as np
 import pandas as pd
 
@@ -8,15 +8,17 @@ import pandas as pd
 class PatientPred(PandasRecord):
     NAME_SCORE: str = "score"
     NAME_PRED: str = "prediction"
+    COL_COUNT: str = "patch_count"
+    NAME_PRESERVED: Set[str] = {NAME_SCORE, NAME_PRED, COL_COUNT}
 
     def __init__(self,
-                 patient_ground_truth: PatientSlideCollection,
+                 patient_ground_truth: SheetCollection,
                  class_list: Sequence[str],
                  ):
         super().__init__()
         self._patient_ground_truth = patient_ground_truth
         self._class_list: np.ndarray = np.asarray(class_list)
-        self.build_df(PatientPred.NAME_SCORE, self._class_list)
+        self.build_df(PatientPred.NAME_SCORE, self._class_list, meta=PatientPred.COL_COUNT)
         self.build_df(PatientPred.NAME_PRED, self._class_list)
 
     @property
@@ -24,15 +26,19 @@ class PatientPred(PandasRecord):
         return self._patient_ground_truth
 
     def load_data(self, table_name, data_list: Sequence, filenames: Sequence[str], flush: bool):
-        PatientSlideCollection.load_data_by_patient(patient_src_record=self.patient_info,
-                                                    target_data_frame=self.get_df(table_name),
-                                                    data_list=data_list,
-                                                    filenames=filenames,
-                                                    flush=flush
-                                                    )
+        SheetCollection.load_data_by_patient(patient_src_record=self.patient_info,
+                                             target_data_frame=self.get_df(table_name), data_list=data_list,
+                                             filenames=filenames, flush=flush)
 
-    def load_score(self, scores_all_category: Sequence[Sequence[float]], filenames: Sequence[str], flush: bool):
-        self.load_data(PatientPred.NAME_SCORE, scores_all_category, filenames, flush)
+    def load_score(self, scores_all_category: Sequence[np.ndarray], filenames: Sequence[str], flush: bool,
+                   expand: bool = False):
+        # add extra column for counts
+        scores_array: np.ndarray = np.atleast_2d(np.asarray(scores_all_category))
+        if expand:
+            scores_all_category_expanded = np.ones((scores_array.shape[0], scores_array.shape[1]+1))
+            scores_all_category_expanded[:, :-1] = scores_array
+            scores_array = scores_all_category_expanded
+        self.load_data(PatientPred.NAME_SCORE, scores_array, filenames, flush)
 
     def entry(self, class_value: str) -> Dict[str, int]:
         assert class_value in self.class_list, f"Undefined Class{class_value} in {self.class_list}"
@@ -56,7 +62,7 @@ class CascadedPred(PatientPred):
         return self._partition
 
     def __init__(self,
-                 patient_ground_truth: PatientSlideCollection,
+                 patient_ground_truth: SheetCollection,
                  class_list: Sequence,
                  partition: Sequence[Sequence[int]],
                  ):
@@ -74,7 +80,7 @@ class CascadedPred(PatientPred):
             # otherwise the sub_table collapses to series and column_sum is reduced to scalar
             patient_ids = [patient_ids]
         sub_table: pd.DataFrame = self.patient_info.patient_ground_truth.loc[patient_ids]
-        # gt class --> current class grouping. At least binary (occurrance). Better to sum the count.
+        # gt class --> current class grouping. At least binary (occurrence). Better to sum the count.
         final_counts: pd.DataFrame = pd.DataFrame()
         for idx, group_idx in enumerate(self._partition):
             group_column: np.ndarray = self.patient_info.class_list[group_idx]
