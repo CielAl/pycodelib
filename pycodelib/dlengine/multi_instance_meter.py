@@ -4,7 +4,9 @@ import numpy as np
 import numbers
 from torchnet.meter.meter import Meter
 from pycodelib.patients import SheetCollection, CascadedPred
-import pandas as pd
+from pycodelib.common import default_not_none
+from sklearn.metrics import confusion_matrix
+from pycodelib.metrics import multi_class_roc_auc
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -40,14 +42,15 @@ class MultiInstanceMeter(Meter):
         Returns:
 
         """
-        label_occurrence = np.atleast_2d(label_occurrence_in)
+        # label_occurrence = np.atleast_2d(label_occurrence_in)
         # default [No Path, BCC, Situ, Invasive]. BCC+Situ = BCC. Invasive+Situ = Invasive
+        raise NotImplementedError(self)
 
     def __init__(self,
                  patient_info: SheetCollection,
                  patient_pred: CascadedPred,
-                 positive_class: int = 1,
-                 multual_exclusion_collate=None):
+                 positive_class: Sequence[int],  # todo
+                 label_collate=None):
         """
             Constructor.
         Args:
@@ -57,15 +60,28 @@ class MultiInstanceMeter(Meter):
         self._instance_map: Dict[str, Any] = dict()
         self._patient_info: SheetCollection = patient_info
         self._patient_pred: CascadedPred = patient_pred
-        if multual_exclusion_collate is None:
-            self.mutual_exclusion_collate = self.default_label_collate
+        self._positive_class = positive_class
+        self.label_collate = default_not_none(label_collate, self.default_label_collate)
+
     @classmethod
     def build(cls,
               patient_info: SheetCollection,
               class_list: Sequence,
-              partition: Sequence[Sequence[int]]):
+              partition: Sequence[Sequence[int]],
+              positive_class: Sequence[int] = None):
         patient_pred = CascadedPred(patient_info, class_list=class_list, partition=partition)
-        return cls(patient_info=patient_info, patient_pred=patient_pred)
+        positive_class = cls.default_positive(partition, positive_class=positive_class)
+        assert positive_class.size <= len(partition), f"More positive classes than total # of classes" \
+            f"{positive_class} vs. Partition:{partition}"
+        return cls(patient_info=patient_info, patient_pred=patient_pred, positive_class=positive_class)
+
+    @staticmethod
+    def default_positive(partition, positive_class=None):
+        if len(partition) == 2:
+            positive_class: np.ndarray = np.asarray(default_not_none(positive_class, [1]))
+        else:
+            positive_class: np.ndarray = np.asarray(default_not_none(positive_class, np.arange(len(partition))))
+        return positive_class
 
     @staticmethod
     def vectorized_obj(obj_in: Any, scalar_type: type, at_least_1d=False, err_msg: str = "") -> np.ndarray:
@@ -137,7 +153,11 @@ class MultiInstanceMeter(Meter):
         """
         self.add((keys, values))
 
-    def value(self):
+    @staticmethod
+    def true_label(label):
+        ...
+
+    def value_helper(self):
         """
             todo Move the fetch_prediction here.
         Returns:
@@ -154,17 +174,34 @@ class MultiInstanceMeter(Meter):
         # class name
         self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
         score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
-        pred_scores_all_category = score_table.values.copy()
+        scores_all_class = score_table.values.copy()
         # add None (extra dim) in dims for broadcasting (divide a column),
         # otherwise the [:, -1] returns a row vector and performs division on rows.
-        pred_scores_all_category[:, :-1] /= pred_scores_all_category[:, -1, None]
-        pred_scores_all_category = pred_scores_all_category[:, :-1]
+        scores_all_class[:, :-1] /= scores_all_class[:, -1, None]
+        scores_all_class = scores_all_class[:, :-1]
 
         true_label_table = self.patient_pred.get_ground_truth(score_table.index)
-        true_labels = true_label_table.values
-        rows = np.asarray(score_table.index)
-        columns = np.asarray(score_table.keys())
-        return pred_scores_all_category, true_labels, rows, columns
+        true_labels_occurrence = np.atleast_2d(true_label_table.values)
+        assert true_labels_occurrence.ndim == 2, f"Label occurrence is not 2d: {true_labels_occurrence.ndim}"
+        true_labels = true_labels_occurrence.nonzero()[-1]
+        rows_index = np.asarray(score_table.index)
+        columns_keys = np.asarray(score_table.keys())[:-1]
+        patch_counts = score_table.values[:, -1].copy()
+        return scores_all_class, true_labels, patch_counts, rows_index, columns_keys
+
+    def value(self):
+        scores_all_class, true_labels, patch_counts, rows_index, columns_keys = self.value_helper()
+        raw_data = {
+            "rows_index": rows_index,
+            "columns_keys": columns_keys,
+            "patch_counts": patch_counts,
+            "scores_all_class": scores_all_class,
+            "true_labels": true_labels,
+        }
+        conf_pred_label = scores_all_class.argmax(axis=1)
+        conf_mat = confusion_matrix(true_labels, conf_pred_label)
+        roc_auc_dict = multi_class_roc_auc(true_labels, scores_all_class, self._positive_class)
+        return conf_mat, roc_auc_dict, raw_data
 
     def reset(self):
         """
@@ -174,7 +211,6 @@ class MultiInstanceMeter(Meter):
             None
         """
         self._instance_map.clear()
-
 
 
 '''
@@ -201,3 +237,22 @@ class MultiInstanceMeter(Meter):
         self.patient_col.load_prediction(pred_labels_str, filenames)
         """
 '''
+"""
+        roc_auc_dict: Dict[int, Dict] = dict()
+        for class_id in self._positive_class:
+            y_true = true_labels.copy()
+            # so negative = positive - 1 --> labels are  [pos -1, pos]
+            y_true[y_true != class_id] = class_id - 1
+            # shift to [0, 1]
+            y_true += 1
+            y_score = scores_all_class[:, class_id]
+            auc = roc_auc_score(y_true, y_score)
+            fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=class_id)
+            pk_data = {
+                "auc": auc,
+                "fpr": fpr,
+                "tpr": tpr,
+                "thresholds": thresholds
+            }
+            roc_auc_dict[class_id] = pk_data
+"""
