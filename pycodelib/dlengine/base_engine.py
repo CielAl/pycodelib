@@ -26,6 +26,7 @@ class SkinEngine(AbstractEngine):
                  patient_col: SheetCollection,
                  sub_class_list: Sequence,
                  class_partition: Sequence[Union[int, Sequence[int]]],
+                 positive_class: Sequence[int] = None,
                  val_phases: Dict[bool, str] = None):
 
         super().__init__(device, model, loss, iterator_getter)
@@ -44,12 +45,19 @@ class SkinEngine(AbstractEngine):
         self.num_classes: int = self.class_partition.size
 
         self.membership = None  # todo - EM
-
+        self._positive_class = positive_class
         # meters
         self.add_meter('patch_accuracy_meter', ClassErrorMeter(accuracy=True))
         self.add_meter('conf_meter', ConfusionMeter(self.num_classes, normalized=False))
         self.add_meter('loss_meter', AverageValueMeter())
-        self.add_meter('multi_instance_meter', MultiInstanceMeter(self.patient_info, self.patient_pred))
+        self.add_meter('multi_instance_meter',
+                       MultiInstanceMeter(self.patient_info,
+                                          self.patient_pred,
+                                          positive_class=
+                                          MultiInstanceMeter.default_positive(self.class_partition,
+                                                                              self._positive_class)
+                                          )
+                       )
         self.add_meter('auc_meter', AUCMeter())
 
         # debug
@@ -239,5 +247,6 @@ class SkinEngine(AbstractEngine):
         """
         self.meter_dict['multi_instance_meter'].add(patch_name_score)
 
-        if self.num_classes == 2:
-            self.meter_dict['auc_meter'].add(pred_softmax[:, 1], label)
+        # todo multiclass generalization: probably need a new meter
+        # if self.num_classes == 2:
+        self.meter_dict['auc_meter'].add(pred_softmax[:, self._positive_class[0]], label)
