@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset as TorchDataset
 from typing import Sequence, Callable
 from pycodelib import common
+from openslide import OpenSlide
 import logging
 logging.basicConfig(level=logging.DEBUG)
 # from abc import ABC, abstractmethod
@@ -145,3 +146,46 @@ class MemSet(TorchDataset):
         if self.img_transform is not None:
             img = self.img_transform(img)
         return img
+
+
+class SlideSet(TorchDataset):
+    def __init__(self, file_name, patch_size, level=0, by_row=True):
+        self.file_name = file_name
+        self.patch_size = patch_size
+        self.level = level
+        self.by_row = by_row
+
+    @staticmethod
+    def segment(osh, patch_size, level=0, by_row=True):
+        width, height = osh.level_dimensions[level]
+        if by_row:
+            length = width
+        else:
+            length = height
+        step_num = np.ceil(length / patch_size).astype(np.int)
+        return step_num
+
+    @staticmethod
+    def idx2loc(osh, index, patch_size, level=0, by_row=True):
+        row_step_num = SlideSet.segment(osh, patch_size, level=level, by_row=by_row)
+        vert = index // row_step_num * patch_size
+        horiz = index % row_step_num * patch_size
+        return horiz, vert
+
+    def __getitem__(self, index):
+        osh = OpenSlide(self.file_name)
+        c, r = SlideSet.idx2loc(osh, index, self.patch_size, level=self.level, by_row=self.by_row)
+        pil_region = osh.read_region(location=(c, r), level=self.level, size=(self.patch_size, self.patch_size))
+        return np.array(pil_region)
+
+    def __len__(self):
+        osh = OpenSlide(self.file_name)
+        step_num = SlideSet.segment(osh,
+                                    self.patch_size,
+                                    self.level,
+                                    by_row=self.by_row)
+        step_num_dual = SlideSet.segment(osh,
+                                         self.patch_size,
+                                         self.level,
+                                         by_row=not self.by_row)
+        return step_num * step_num_dual

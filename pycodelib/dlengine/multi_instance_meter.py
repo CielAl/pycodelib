@@ -174,7 +174,8 @@ class MultiInstanceMeter(Meter):
         # class name
         self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
         score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
-        scores_all_class = score_table.values.copy()
+        # noinspection PyUnresolvedReferences
+        scores_all_class: np.ndarray = score_table.values.copy()
         # add None (extra dim) in dims for broadcasting (divide a column),
         # otherwise the [:, -1] returns a row vector and performs division on rows.
         scores_all_class[:, :-1] /= scores_all_class[:, -1, None]
