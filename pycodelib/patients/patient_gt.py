@@ -134,7 +134,7 @@ class SheetCollection(PatientSlideCollection):
         if flush:
             type(patient_src_record).flush_df(target_data_frame)
         patient_id_list: List = SheetCollection.key_to_row(patient_src_record, filenames)
-        print(patient_id_list)
+        # print(patient_id_list)
         for (patient_id, data) in zip(patient_id_list, data_list):
             PandasRecord.insert_data(target_data_frame, patient_id, data)
 """

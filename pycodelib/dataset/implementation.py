@@ -8,7 +8,6 @@ from openslide import OpenSlide
 import logging
 logging.basicConfig(level=logging.DEBUG)
 # from abc import ABC, abstractmethod
-# -todo pytable-based base class
 
 
 class H5SetBasic(TorchDataset):
@@ -60,12 +59,14 @@ class H5SetBasic(TorchDataset):
 
     def __getitem__(self, index):
         with tables.open_file(self.filename, 'r') as db:
-            img_list = getattr(db.root, self.types[0])
-            label_list = getattr(db.root, self.types[1])
+            # img_list = getattr(db.root, self.types[0])
+            # label_list = getattr(db.root, self.types[1])
+            data_list = [getattr(db.root, x) for x in self.types]
             filename_list = getattr(db.root, 'filename')
-            img = img_list[index, ]
-            label = label_list[index, ]
+            img = data_list[0][index, ]
+            label = data_list[1][index, ]
             filenames = filename_list[index, ]
+            data_out = [data_array[index, ] for data_array in data_list]
         if isinstance(index, slice):
             filenames = [x.decode('utf-8') for x in filenames]
         else:
@@ -74,8 +75,10 @@ class H5SetBasic(TorchDataset):
             index_out = type(self).slice2array(index, len(self))
         else:
             index_out = np.asarray(index)
-        img = type(self).dim_recovered_data(img)
-        return img, label, filenames, index_out
+
+        # image
+        data_out[0] = H5SetBasic.dim_recovered_data(data_out[0])
+        return tuple(data_out) + (filenames, index_out)
 
 
 class H5SetTransform(H5SetBasic):
