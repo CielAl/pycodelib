@@ -367,6 +367,7 @@ class DefaultStats(AbstractModelStats):
             torch.save(checkpoint, chk_full)
         else:
             loss_mark = ''
+
         epoch_profile = f"[Epoch {self.epoch_count}]."
         basic_verbose = f"{phase} -{epoch_profile}" \
             f"Loss:= {loss:.5f}{loss_mark} " \
@@ -382,16 +383,17 @@ class DefaultStats(AbstractModelStats):
         patch_conf_norm: np.ndarray = patch_conf.astype('float') / patch_conf.sum(axis=1)[:, np.newaxis]
         multi_conf_norm: np.ndarray = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
 
-        tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
-        tn_multi, fp_multi, fn_multi, tp_multi = multi_conf_norm.ravel()
+        if self.num_classes <= 2:
+            tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
+            tn_multi, fp_multi, fn_multi, tp_multi = multi_conf_norm.ravel()
+            self.visualize_log(DefaultStats.VIZ_PATCH_TPR, state['train'], self.epoch_count, tp_patch)
+            self.visualize_log(DefaultStats.VIZ_PATCH_TNR, state['train'], self.epoch_count, tn_patch)
+            self.visualize_log(DefaultStats.VIZ_MULTI_TPR, state['train'], self.epoch_count, tp_multi)
+            self.visualize_log(DefaultStats.VIZ_MULTI_TNR, state['train'], self.epoch_count, tn_multi)
 
         self.visualize_log(DefaultStats.VIZ_LOSS, state['train'], self.epoch_count, loss)
-        self.visualize_log(DefaultStats.VIZ_PATCH_TPR, state['train'], self.epoch_count, tp_patch)
-        self.visualize_log(DefaultStats.VIZ_PATCH_TNR, state['train'], self.epoch_count, tn_patch)
-        self.visualize_log(DefaultStats.VIZ_PATCH_AUC, state['train'], self.epoch_count, patch_auc)
 
-        self.visualize_log(DefaultStats.VIZ_MULTI_TPR, state['train'], self.epoch_count, tp_multi)
-        self.visualize_log(DefaultStats.VIZ_MULTI_TNR, state['train'], self.epoch_count, tn_multi)
+        self.visualize_log(DefaultStats.VIZ_PATCH_AUC, state['train'], self.epoch_count, patch_auc)
         self.visualize_log(DefaultStats.VIZ_MULTI_AUC, state['train'],
                            self.epoch_count,
                            patient_lvl_data.get('auc', 0))

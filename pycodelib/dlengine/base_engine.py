@@ -8,7 +8,6 @@ import torch.nn as nn
 from tqdm import tqdm
 from pycodelib.debug import Debugger
 from .model_stats import AbstractModelStats
-import os
 import pickle
 
 
@@ -51,7 +50,7 @@ class BaseEngine(AbstractEngine):
         # (img), label, mask, row, col, img_original, filenames, index, train_flag
         if len(data_batch) == 0 or len(data_batch[1]) == 0:
             dummy = self.dummy
-            return (dummy, None)
+            return dummy, dummy
         img, label_in, *rest = data_batch
         img = img.to(self.device)
         label = self.label_collator(label_in).type('torch.LongTensor').to(self.device)
@@ -182,4 +181,3 @@ class BaseEngine(AbstractEngine):
         if not state["valid_sample"]:
             return
         self.model_stats.hook(self.on_forward.__name__, state)
-
