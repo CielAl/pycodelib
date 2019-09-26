@@ -1,6 +1,7 @@
 """
     Abstract classes.
 """
+import os
 from typing import Callable, Tuple, Dict, Any, List
 import torch
 from torch.utils.data import DataLoader
@@ -184,6 +185,12 @@ class AbstractEngine(Callable, EngineHooks):
         evaluate the model as serve as the "network/model" parameter of tnt/engine
     """
 
+    def dump_file_name(self, title: str, ext: str):
+        title = str(title)
+        filename = f'{self.engine_name}_{title}.{ext}'
+        full_path = os.path.join(self.model_export_path, filename)
+        return full_path
+
     @property
     def model(self) -> nn.Module:
         """
@@ -201,6 +208,10 @@ class AbstractEngine(Callable, EngineHooks):
             The loss property. The definition of loss append to the network.
         """
         return self._loss
+
+    @property
+    def optimizer(self) -> Optimizer:
+        return self._optimizer
 
     @abstractmethod
     def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -235,7 +246,9 @@ class AbstractEngine(Callable, EngineHooks):
                  device: torch.device,
                  model: nn.Module,
                  loss: nn.Module,
-                 iterator_getter: AbstractIteratorBuilder):
+                 iterator_getter: AbstractIteratorBuilder,
+                 model_export_path: str,
+                 engine_name: str = ''):
         """
 
         Args:
@@ -247,6 +260,7 @@ class AbstractEngine(Callable, EngineHooks):
         super().__init__()
         # Initializing the maxepoch field.
         self._maxepoch: int = -1
+        self._optimizer: Optimizer = None
         # The torchnet.engine object.
         # The device which host the model and all variables.
         self.device: torch.device = device
@@ -256,6 +270,10 @@ class AbstractEngine(Callable, EngineHooks):
         self._loss: nn.Module = loss
         # Iterator getter
         self.iterator_getter: AbstractIteratorBuilder = iterator_getter
+        self.model_export_path = model_export_path
+        if not os.path.exists(self.model_export_path):
+            os.mkdir(self.model_export_path)
+        self.engine_name = engine_name
         # Empty Meter storage.
 
     def process(self, maxepoch: int, optimizer: Optimizer, batch_size: int = 4, num_workers: int = 0):
@@ -272,6 +290,7 @@ class AbstractEngine(Callable, EngineHooks):
         """
         debugger.log("process start")
         self._maxepoch = maxepoch
+        self._optimizer = optimizer
         self.engine.train(self,
                           self.iterator_getter.get_iterator(
                                                             mode=True,
@@ -281,3 +300,6 @@ class AbstractEngine(Callable, EngineHooks):
                                                             ),
                           maxepoch=self._maxepoch,
                           optimizer=optimizer)
+
+    def label_collator(self, labels):
+        raise NotImplemented

@@ -6,7 +6,7 @@ from torchnet.meter.meter import Meter
 from pycodelib.patients import SheetCollection, CascadedPred
 from pycodelib.common import default_not_none
 from sklearn.metrics import confusion_matrix
-from pycodelib.metrics import multi_class_roc_auc
+from pycodelib.metrics import multi_class_roc_auc_vs_all
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -50,7 +50,8 @@ class MultiInstanceMeter(Meter):
                  patient_info: SheetCollection,
                  patient_pred: CascadedPred,
                  positive_class: Sequence[int],  # todo
-                 label_collate=None):
+                 # label_collate=None,
+                 binarize: bool = True):
         """
             Constructor.
         Args:
@@ -61,7 +62,8 @@ class MultiInstanceMeter(Meter):
         self._patient_info: SheetCollection = patient_info
         self._patient_pred: CascadedPred = patient_pred
         self._positive_class = positive_class
-        self.label_collate = default_not_none(label_collate, self.default_label_collate)
+        # self.label_collate = default_not_none(label_collate, self.default_label_collate)
+        self.binarize = binarize
 
     @classmethod
     def build(cls,
@@ -84,13 +86,13 @@ class MultiInstanceMeter(Meter):
         return positive_class
 
     @staticmethod
-    def vectorized_obj(obj_in: Any, scalar_type: type, at_least_1d=False, err_msg: str = "") -> np.ndarray:
+    def vectorized_obj(obj_in: Any, scalar_type: type, at_least_2d=False, err_msg: str = "") -> np.ndarray:
         """
             Vectorize the input
         Args:
             obj_in: Original input
             scalar_type:    Type if scalar
-            at_least_1d:    Whether or not guarantee the dimension
+            at_least_2d:    Whether or not guarantee the dimension
             err_msg:    Message to print if cannot be vectorized
 
         Returns:
@@ -100,16 +102,16 @@ class MultiInstanceMeter(Meter):
         already_vector: bool = isinstance(obj_in, Sequence) or isinstance(obj_in, np.ndarray)
 
         if torch.is_tensor(obj_in):
-            obj: np.ndarray = obj_in.cpu().squeeze().numpy()
+            obj: np.ndarray = np.atleast_1d(obj_in.cpu().squeeze().numpy())
         # pack to np array if a scalar of matched type or is already in vector form.
         elif is_matched_scalar or already_vector:
-            obj: np.ndarray = np.asarray([obj_in])
+            obj: np.ndarray = np.atleast_1d(np.asarray(obj_in).squeeze())
         else:
             raise TypeError(err_msg)
-        if at_least_1d:
-            obj: np.ndarray = np.atleast_1d(obj)
-        else:
-            obj: np.ndarray = obj.squeeze()
+        # obj = obj.squeeze() squeeze first than np.atleast_1d, as array of one will be degraded to scalar
+        if at_least_2d:
+            # obj: np.ndarray = np.atleast_1d(obj)
+            obj = np.atleast_2d(obj)
         return obj
 
     def add(self, elements: Tuple[Union[torch.Tensor, Sequence[Hashable]], Union[torch.Tensor, Sequence]]):
@@ -127,14 +129,15 @@ class MultiInstanceMeter(Meter):
 
         # Vectorization:
         # breakpoint()
-        keys = type(self).vectorized_obj(keys_in, Hashable, at_least_1d=False, err_msg=f"{type(keys_in)}")
-        values = type(self).vectorized_obj(values_in, numbers.Number, at_least_1d=True, err_msg=f"{type(values_in)}")
+        # keys must be 1d
+        keys = type(self).vectorized_obj(keys_in, Hashable, at_least_2d=False, err_msg=f"{type(keys_in)}")
+        values = type(self).vectorized_obj(values_in, numbers.Number, at_least_2d=True, err_msg=f"{type(values_in)}")
         values = values.astype(np.float64)
         # Now keys and values are numpy arrays.
         # Validate if the length agree.
+
         assert keys.shape[0] == values.shape[0], f"Length not agree. key={keys}|{len(keys)}." \
             f" values={values}|{values.shape[0]}"
-
         # insert keys and values into a dict: self.instance_map.
         for k, v in zip(keys, values):
             default_store: List = self.instance_map.get(k, [])
@@ -157,6 +160,22 @@ class MultiInstanceMeter(Meter):
     def true_label(label):
         ...
 
+    @staticmethod
+    def curate_patient_label_helper(true_labels_occurrence, row, high_priority_col: int = 1):
+        # use indexing like [][] will create a copy instead of a view
+        true_labels_occurrence[row, 0:high_priority_col] = 0
+        true_labels_occurrence[row, high_priority_col+1:] = 0
+        return true_labels_occurrence
+
+    @staticmethod
+    def curate_patient_label(true_labels_occurrence, high_priority_col):
+        # if there are multiple labels per patient
+        row_multi_label = np.where((true_labels_occurrence > 0).all(axis=1))
+        true_labels_occurrence = MultiInstanceMeter.curate_patient_label_helper(true_labels_occurrence,
+                                                                                row_multi_label,
+                                                                                high_priority_col=high_priority_col)
+        return true_labels_occurrence
+
     def value_helper(self):
         """
             todo Move the fetch_prediction here.
@@ -175,6 +194,7 @@ class MultiInstanceMeter(Meter):
         self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
         score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
         # noinspection PyUnresolvedReferences
+        # breakpoint()
         scores_all_class: np.ndarray = score_table.values.copy()
         # add None (extra dim) in dims for broadcasting (divide a column),
         # otherwise the [:, -1] returns a row vector and performs division on rows.
@@ -183,8 +203,12 @@ class MultiInstanceMeter(Meter):
 
         true_label_table = self.patient_pred.get_ground_truth(score_table.index)
         true_labels_occurrence = np.atleast_2d(true_label_table.values)
+        true_labels_occurrence = MultiInstanceMeter.curate_patient_label(true_labels_occurrence, high_priority_col=1)
         assert true_labels_occurrence.ndim == 2, f"Label occurrence is not 2d: {true_labels_occurrence.ndim}"
-        true_labels = true_labels_occurrence.nonzero()[-1]
+        # bug
+        # breakpoint()
+        true_labels = np.argwhere(true_labels_occurrence > 0)[:, -1]
+        # breakpoint()
         rows_index = np.asarray(score_table.index)
         columns_keys = np.asarray(score_table.keys())[:-1]
         patch_counts = score_table.values[:, -1].copy()
@@ -200,8 +224,12 @@ class MultiInstanceMeter(Meter):
             "true_labels": true_labels,
         }
         conf_pred_label = scores_all_class.argmax(axis=1)
+        # breakpoint()
         conf_mat = confusion_matrix(true_labels, conf_pred_label)
-        roc_auc_dict = multi_class_roc_auc(true_labels, scores_all_class, self._positive_class)
+        if not self.binarize:
+            roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, self._positive_class)
+        else:
+            roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, [1])
         return conf_mat, roc_auc_dict, raw_data
 
     def reset(self):
@@ -212,48 +240,3 @@ class MultiInstanceMeter(Meter):
             None
         """
         self._instance_map.clear()
-
-
-'''
-    def _fetch_prediction(self):
-        """
-            -todo Consider move to the multi_instance_meter
-        Returns:
-
-        """
-        return
-        """
-        patch_score = self.meter_dict['multi_instance_meter'].value()
-        patch_label_collection = {
-                        key: [score_array.argmax(dim=1) for score_array in score_array_list]
-                        for (key, score_array_list) in patch_score.items()
-        }
-        patch_label_prediction = {
-            key: max(col)
-            for (key, col) in patch_label_collection.items()
-        }
-        pred_labels = list(patch_label_prediction.values())
-        pred_labels_str = [self.class_names[x] for x in pred_labels]
-        filenames = list(patch_label_prediction.keys())
-        self.patient_col.load_prediction(pred_labels_str, filenames)
-        """
-'''
-"""
-        roc_auc_dict: Dict[int, Dict] = dict()
-        for class_id in self._positive_class:
-            y_true = true_labels.copy()
-            # so negative = positive - 1 --> labels are  [pos -1, pos]
-            y_true[y_true != class_id] = class_id - 1
-            # shift to [0, 1]
-            y_true += 1
-            y_score = scores_all_class[:, class_id]
-            auc = roc_auc_score(y_true, y_score)
-            fpr, tpr, thresholds = roc_curve(y_true, y_score, pos_label=class_id)
-            pk_data = {
-                "auc": auc,
-                "fpr": fpr,
-                "tpr": tpr,
-                "thresholds": thresholds
-            }
-            roc_auc_dict[class_id] = pk_data
-"""

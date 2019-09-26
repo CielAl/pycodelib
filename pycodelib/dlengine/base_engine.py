@@ -8,28 +8,36 @@ import torch.nn as nn
 from tqdm import tqdm
 from pycodelib.debug import Debugger
 from .model_stats import AbstractModelStats
+import os
+import pickle
 
 
 class BaseEngine(AbstractEngine):
     """
         Engine for the skin cancer project. Patient-level.
     """
-    def __init__(self, device: torch.device,
+    def __init__(self,
+                 device: torch.device,
                  model: nn.Module,
                  loss: nn.Module,
                  iterator_getter: AbstractIteratorBuilder,
                  model_stats: AbstractModelStats,
+                 model_export_path: str = '.',
+                 engine_name: str = ''
                  ):
 
-        super().__init__(device, model, loss, iterator_getter)
+        super().__init__(device, model, loss, iterator_getter, model_export_path, engine_name=engine_name)
 
         self.model_stats: AbstractModelStats = model_stats
-        self.membership = None  # todo - EM
         # debug
         self.debugger = Debugger(__name__)
         # explicit printing
         self.debugger.level = -1
-        
+        self.dummy = torch.tensor([0.]).requires_grad_(True)
+
+    def label_collator(self, labels):
+        return self.model_stats.label_collator(labels)
+
     def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
@@ -40,11 +48,19 @@ class BaseEngine(AbstractEngine):
             loss: the loss
             prediction: the prediction of the output layer
         """
-        img, label, *rest = data_batch
+        # (img), label, mask, row, col, img_original, filenames, index, train_flag
+        if len(data_batch) == 0 or len(data_batch[1]) == 0:
+            dummy = self.dummy
+            return (dummy, None)
+        img, label_in, *rest = data_batch
         img = img.to(self.device)
-        label = label.type('torch.LongTensor').to(self.device)
+        label = self.label_collator(label_in).type('torch.LongTensor').to(self.device)
         prediction = self.model(img)
         loss = self.loss(prediction, label)
+        # index = rest[-2]
+        # softmax = nn.Softmax(dim=1)
+        # score = softmax(prediction).data.detach().cpu().numpy()
+        # self.model_stats.update_membership(score, index)
         return loss, prediction
 
     def on_start(self, state: Dict[str, Any], **kwargs):
@@ -83,6 +99,11 @@ class BaseEngine(AbstractEngine):
         Returns:
 
         """
+        if len(state['sample']) == 0:
+            # print("bad sample")
+            state['valid_sample'] = False
+            return
+        state['valid_sample'] = True
         state['sample'].append(state['train'])
         self.model_stats.hook(self.on_sample.__name__, state)
         self.model.train(state['train'])
@@ -96,6 +117,8 @@ class BaseEngine(AbstractEngine):
         Returns:
 
         """
+        if not state["valid_sample"]:
+            return
         self.model_stats.hook(self.on_update.__name__, state)
 
     def on_start_epoch(self, state: Dict[str, Any], **kwargs):
@@ -112,6 +135,23 @@ class BaseEngine(AbstractEngine):
         state['iterator'] = tqdm(state['iterator'])
         self.model_stats.hook(self.on_start_epoch.__name__, state)
 
+    def on_end_epoch_checkpoint_helper(self, state):
+        checkpoint = {
+            'epoch': state['epoch'],
+            'maxepoch': state['maxepoch'],
+            'model_state_dict': self.model.state_dict(),
+            'opt_state_dict': self._optimizer.state_dict()
+        }
+        chk_full = self.dump_file_name(f"model_{state['epoch']}", 'pth')
+        torch.save(checkpoint, chk_full)
+
+        model_full = self.dump_file_name(f"model_obj_{state['epoch']}", 'pth')
+        torch.save(self.model, model_full)
+
+        stats_file = self.dump_file_name(f"latent_{state['epoch']}", "pickle")
+        with open(stats_file, 'wb') as handle:
+            pickle.dump(self.model_stats.membership, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
     def on_end_epoch(self, state: Dict[str, Any], **kwargs):
         """
             Initialize the test procedure to evaluate the model performance.
@@ -124,9 +164,11 @@ class BaseEngine(AbstractEngine):
         """
         self.model_stats.hook(self.on_end_epoch.__name__, state)
         state['train'] = False
-        # todo testing the value() breakpoints
         torch.cuda.empty_cache()
+        self.on_end_epoch_checkpoint_helper(state)
         self.engine.test(self, self.iterator_getter.get_iterator(mode=False, shuffle=False))
+        # must revert it back
+        state['train'] = True
 
     def on_forward(self, state: Dict[str, Any], **kwargs):
         """
@@ -137,4 +179,7 @@ class BaseEngine(AbstractEngine):
         Returns:
 
         """
+        if not state["valid_sample"]:
+            return
         self.model_stats.hook(self.on_forward.__name__, state)
+

@@ -32,7 +32,7 @@ setup(name=__PROJECT_NAME,
           'pillow>=5.4.0',
           'joblib>=0.13.2',
           'torch>=1.0.1',
-          'opencv-python>=3.4.5.20', 'torchnet', 'pandas', 'torchvision'
+          'opencv-python>=3.4.5.20', 'torchnet', 'pandas', 'torchvision', 'visdom'
       ],
       zip_safe=False,
       python_requires='>=3.6.0'
