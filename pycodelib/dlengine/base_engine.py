@@ -56,10 +56,10 @@ class BaseEngine(AbstractEngine):
         label = self.label_collator(label_in).type('torch.LongTensor').to(self.device)
         prediction = self.model(img)
         loss = self.loss(prediction, label)
-        # index = rest[-2]
-        # softmax = nn.Softmax(dim=1)
-        # score = softmax(prediction).data.detach().cpu().numpy()
-        # self.model_stats.update_membership(score, index)
+        index = rest[-2].cpu().detach().numpy()
+        softmax = nn.Softmax(dim=1)
+        score = softmax(prediction).cpu().detach().numpy()
+        self.model_stats.update_membership(score, index)
         return loss, prediction
 
     def on_start(self, state: Dict[str, Any], **kwargs):

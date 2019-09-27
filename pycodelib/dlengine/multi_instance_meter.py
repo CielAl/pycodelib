@@ -188,6 +188,7 @@ class MultiInstanceMeter(Meter):
         scores_all_category_roi_collection = list(self.instance_map.values())
         # reduce from patch to ROI by averaging. Note: for patient level there shall be
         # one more level of averaging
+        #  np.histogram(np.asarray(scores_all_category_roi_collection[3]), range=(0,1), density=True)
         scores_all_category: List = [np.asarray(scores_per_roi).mean(axis=0)
                                      for scores_per_roi in scores_all_category_roi_collection]
         # class name
@@ -224,12 +225,13 @@ class MultiInstanceMeter(Meter):
             "true_labels": true_labels,
         }
         conf_pred_label = scores_all_class.argmax(axis=1)
-        # breakpoint()
+
         conf_mat = confusion_matrix(true_labels, conf_pred_label)
         if not self.binarize:
             roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, self._positive_class)
         else:
             roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, [1])
+        # breakpoint()
         return conf_mat, roc_auc_dict, raw_data
 
     def reset(self):
