@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import torch.nn as nn
 
-
+class
 class GroupBlock(ABC, nn.Module):
 
     @property

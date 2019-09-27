@@ -1,18 +1,20 @@
+import pickle
 from abc import ABC, abstractmethod
 from typing import Set, Dict, Any, Sequence, Union, Callable, Tuple
+
 import numpy as np
 import torch
 import torch.nn as nn
-from torchnet.meter.meter import Meter
-from torchnet.meter import AverageValueMeter, ClassErrorMeter, ConfusionMeter, AUCMeter
+from torchnet.logger.visdomlogger import BaseVisdomLogger
 from torchnet.logger import VisdomPlotLogger  # ,VisdomLogger
-from pycodelib.patients import CascadedPred, SheetCollection
-from pycodelib.metrics import label_binarize_group
+from torchnet.meter import AverageValueMeter, ClassErrorMeter, ConfusionMeter, AUCMeter
+from torchnet.meter.meter import Meter
 
+from pycodelib.dlengine.skeletal import AbstractEngine
+from pycodelib.metrics import label_binarize_group
+from pycodelib.patients import CascadedPred, SheetCollection
 from ..multi_instance_meter import MultiInstanceMeter
 from ..skeletal import EngineHooks
-from pycodelib.dlengine.skeletal import AbstractEngine
-import pickle
 
 # noinspection SpellCheckingInspection
 softmax: Callable = nn.Softmax(dim=1)
@@ -25,26 +27,32 @@ class BaseModelStats(EngineHooks, ABC):
 class AbstractModelStats(BaseModelStats, ABC):
     # HOOKS_NAME: Set[str] = {"on_start"}
     PHASE_NAMES: Set[str] = {'train', 'val'}
+    DEFAULT_PORT: int = 8097
+    DEFAULT_ENV: str = 'main'
 
     def __init__(self,
                  sub_class_list: Sequence,
                  class_partition: Sequence[Union[int, Sequence[int]]],
-                 is_visualize: bool,
-                 val_phases: Dict[bool, str] = None):
+                 val_phases: Dict[bool, str] = None,
+                 is_visualize: bool = True,
+                 port: int = DEFAULT_PORT,
+                 env: str = DEFAULT_ENV
+                 ):
         super().__init__()
         self.meter_dict: Dict[str, Any] = dict()
         self._membership = None  # todo - EM
         self.sub_class_list = sub_class_list
         self.class_partition: np.ndarray = np.asarray(class_partition)
-
+        self._port = port
         self._is_visualize = is_visualize
         self._viz_logger_dict: Dict[Tuple[str, bool], Any] = dict()
         if val_phases is None:
             val_phases = dict({True: "train", False: "val"})
         self.val_phases: Dict[bool, str] = val_phases
-        assert set(self.val_phases.values()).issubset(AbstractModelStats.PHASE_NAMES),\
+        assert set(self.val_phases.values()).issubset(AbstractModelStats.PHASE_NAMES), \
             f"Invalid Phase Names{self.val_phases}" \
             f"Expected from {AbstractModelStats.PHASE_NAMES}"
+        self.__env = env
 
         # alternatively, to plot test data of a epoch, one may perform engine.test first,
         # and use the state['epoch'] in the training phase + test result that are not yet reset in the meter
@@ -58,6 +66,10 @@ class AbstractModelStats(BaseModelStats, ABC):
         ...
 
     @property
+    def env(self) -> str:
+        return self.__env
+
+    @property
     def epoch_count(self) -> int:
         return self.__epoch_count
 
@@ -68,13 +80,17 @@ class AbstractModelStats(BaseModelStats, ABC):
         self.__epoch_count = 0
 
     def on_end_epoch(self, state: Dict[str, Any], *args, **kwargs):
-        self._evaluation(state)
+        # state['epoch'] is updated before on_end_epoch and after on_update,
+        # as it starts from 0. Hence, evaluation after on_end_epoch has epoch values starting from 1.
         self.epoch_incr()
+        self._evaluation(state)
 
     def on_end(self, state: Dict[str, Any], **kwargs):
         if not state['train']:
             self._evaluation(state)
-        self.epoch_clear()
+        else:
+            # only training alter the epoch
+            self.epoch_clear()
 
     @property
     def is_visualize(self) -> bool:
@@ -115,12 +131,13 @@ class AbstractModelStats(BaseModelStats, ABC):
         phase = self.val_phases.get(state['train'], None)
         return phase
 
-    def add_logger(self, viz_logger_construct,
+    def add_logger(self, viz_logger_construct: type,
                    plot_type: str,
                    name: str,
                    phases: Sequence[bool] = (True, False),
                    control_by_flag: bool = False,
                    **kwargs):
+        assert issubclass(viz_logger_construct, BaseVisdomLogger)
         do_create: bool = True if not control_by_flag else self.is_visualize
         if do_create:
             for phase in phases:
@@ -130,7 +147,10 @@ class AbstractModelStats(BaseModelStats, ABC):
                     'title': title
                 }
                 opts.update(kwargs)
-                viz_logger = viz_logger_construct(plot_type, opts=opts)
+                viz_logger = viz_logger_construct(plot_type,
+                                                  port=self._port,
+                                                  env=self.env,
+                                                  opts=opts)
                 key = (name, phase)
                 self._viz_logger_dict[key] = viz_logger
 
@@ -169,12 +189,17 @@ class DefaultStats(AbstractModelStats):
                  class_partition: Sequence[Union[int, Sequence[int]]],
                  positive_class: Sequence[int],
                  val_phases: Dict[bool, str] = None,
-                 is_visualize: bool = True
+                 is_visualize: bool = True,
+                 port: int = AbstractModelStats.DEFAULT_PORT,
+                 env: str = AbstractModelStats.DEFAULT_ENV
                  ):
         super().__init__(sub_class_list=sub_class_list,
                          class_partition=class_partition,
+                         val_phases=val_phases,
                          is_visualize=is_visualize,
-                         val_phases=val_phases)
+                         port=port,
+                         env=env
+                         )
         self.patient_info = patient_info
         self.patient_pred = patient_pred
 
@@ -207,10 +232,11 @@ class DefaultStats(AbstractModelStats):
         self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_AUC)
 
     def update_membership(self, scores, index):
-        score_dict = {ind: score_row.copy() for ind, score_row in zip(index, scores)}
-        self.membership.update(score_dict)
-        score_dict.clear()
-        del score_dict
+        # debug the memory leak
+        # self.membership.update(score_dict)
+        # index is also a tensor!
+        for ind, score_row in zip(index, scores):
+            self.membership[ind] = score_row  # .max()
 
     @property
     def positive_class(self):
@@ -258,7 +284,7 @@ class DefaultStats(AbstractModelStats):
         part_max = max([max(x) for x in self.class_partition])
         assert part_min <= label_in.max() <= part_max \
             and \
-            part_min <= label_in.min() <= part_max,   \
+            part_min <= label_in.min() <= part_max, \
             f"batch_label exceed range {(label_in.min(), label_in.max())}. Expected in {self.class_partition}"
         label = label_in
         label = label_binarize_group(label, anchor_group=self.positive_class, anchor_positive=True)
@@ -326,6 +352,7 @@ class DefaultStats(AbstractModelStats):
 
         """
         # if train - assert the epoch count.
+
         assert not state['train'] or state['epoch'] == self.epoch_count
         # todo test
         phase = self.phase_name(state)
