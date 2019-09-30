@@ -1,12 +1,14 @@
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from collections import OrderedDict
 
 # version=melanoma
-'''
-    https://github.com/Jongchan/attention-module/blob/master/MODELS/cbam.py
-'''
+"""
+    Author: Jongchan
+    Repository: https://github.com/Jongchan/attention-module/blob/master/MODELS/cbam.py
+"""
 
 
 class BasicConv(nn.Module):
@@ -53,7 +55,7 @@ class ChannelGate(nn.Module):
         )
         self.pool_types = pool_types
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         channel_att_sum = None
         for pool_type in self.pool_types:
             if pool_type == 'avg':
@@ -63,6 +65,7 @@ class ChannelGate(nn.Module):
                 max_pool = F.max_pool2d(x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
                 channel_att_raw = self.mlp(max_pool)
             elif pool_type == 'lp':
+                # noinspection PyTypeChecker
                 lp_pool = F.lp_pool2d(x, 2, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
                 channel_att_raw = self.mlp(lp_pool)
             elif pool_type == 'lse':
