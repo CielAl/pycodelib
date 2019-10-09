@@ -1,12 +1,13 @@
-from typing import Dict, Callable
+from typing import Dict, Callable, List, Tuple, Sequence
 from torch.utils.data import DataLoader
 import torch.utils.data.dataloader
 from pycodelib.dataset import H5SetBasic
 from pycodelib.dlengine.skeletal import AbstractIteratorBuilder
 from torchvision.transforms import Compose
-from typing import List, Tuple, Sequence
+import numpy as np
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.setLevel(level=logging.DEBUG)
 # batch=[(data[0][idx], data[1][idx], data[2][idx]) for idx in range(data[0].shape[0])]
 
 default_collate: Callable = torch.utils.data.dataloader.default_collate
@@ -28,11 +29,29 @@ class TransformAutoCollate(BasicTransform):
     """
         Using auto_collation after data transformation
     """
-    def __init__(self, collate_fn: Callable = None, transforms: Callable = None, label_skipping: Sequence[int] = None):
+    def __init__(self, collate_fn: Callable = None, transforms: Callable = None,
+                 label_skipping: Sequence[int] = None,
+                 group_level: int = 0):
         if collate_fn is None:
             collate_fn = default_collate
         self.label_skipping = label_skipping
+        self._label_set = set(self.label_skipping) if self.label_skipping is not None else None
+        self.group_level = group_level
         super().__init__(collate_fn, transforms)
+
+    def transform_helper(self, x: np.ndarray):
+        if x.ndim <= 3:
+            return self.transforms(x)
+        temp_list = []
+        for element in x:
+            temp_list.append(self.transforms(element))
+        # breakpoint()
+        dtype = type(temp_list[0])
+        if issubclass(dtype, torch.Tensor):
+            result = torch.stack(temp_list)
+        else:
+            result = np.asarray(temp_list)
+        return result
 
     def __call__(self, batch: List[Tuple]):
         """
@@ -52,14 +71,20 @@ class TransformAutoCollate(BasicTransform):
         if self.transforms is not None:
             for idx, data_point in enumerate(batch):
                 # extract data
-                img, label, mask, row, col, filenames, index = data_point
+                img, label, mask, *rest = data_point
                 # modify the batch: transform img and concat the original one after label.
-                batch[idx] = self.transforms(img), label, mask, row, col, img, filenames, index
-        if self.label_skipping is not None:
+                batch[idx] = self.transform_helper(img), label, mask, img, *rest
+        if self.label_skipping is not None and len(self.label_skipping) > 0:
             label_idx = 1
-            batch = [data_tuple for data_tuple in batch if data_tuple[label_idx] not in self.label_skipping]
-        if len(batch) != 0:
+            batch = [data_tuple for data_tuple in batch
+                     if len(
+                            set(np.atleast_1d(data_tuple[label_idx]))
+                            - self._label_set)
+                     != 0]
+        if len(batch) != 0 and self.group_level == 0:
             batch = self.collate_fn(batch)
+        elif self.group_level > 0:
+            batch = batch[0]
         return batch
 
 
@@ -70,7 +95,7 @@ class H5DataGetter(AbstractIteratorBuilder):
     BATCH_SIZE: int = 32
 
     @staticmethod
-    def trans2collate(transform: Callable, skip_class) -> Callable:
+    def trans2collate(transform: Callable, skip_class, group_level) -> Callable:
         """
             Fuse the Transformation into the TransformAutoCollate
         Args:
@@ -85,11 +110,12 @@ class H5DataGetter(AbstractIteratorBuilder):
             raise TypeError(f'Transform is not Callable{type(transform)}')
         # If Callable but not extended from BasicTransform, then perform fusion.
         if not isinstance(transform, BasicTransform):
-            return TransformAutoCollate(transforms=transform, label_skipping=skip_class)
+            return TransformAutoCollate(transforms=transform, label_skipping=skip_class, group_level=group_level)
         # Otherwise: if extended from BasicTransform or is None, identity mapping
         return transform
 
-    def __init__(self, datasets: Dict[bool, H5SetBasic], img_transform_dict: Dict[bool, Compose], skip_class):
+    def __init__(self, datasets: Dict[bool, H5SetBasic], img_transform_dict: Dict[bool, Compose], skip_class,
+                 group_level: int = 0):
         """
 
         Args:
@@ -98,21 +124,24 @@ class H5DataGetter(AbstractIteratorBuilder):
         """
         self._datasets_collection: Dict[bool, H5SetBasic] = datasets
         # Convert the Callable to BasicTransform Object
-        self._transform: Dict[bool, BasicTransform] = {k: H5DataGetter.trans2collate(v, skip_class)
+        self._transform: Dict[bool, BasicTransform] = {k: H5DataGetter.trans2collate(v, skip_class, group_level)
                                                        for k, v in img_transform_dict.items()}
         # -todo later
         self._mode: bool = True
+        self.group_level = group_level
 
     @classmethod
     def build(cls, filename_dict: Dict[bool, str],
               img_transform_dict: Dict[bool, Compose],
-              skip_class):
+              skip_class,
+              group_level: int = 0):
         """
             Factory builder.
         Args:
             filename_dict: Dict in [mode, filename]
             img_transform_dict: Dict of [mode, transformation]. None is allowed.
             skip_class:
+            group_level:
         Returns:
             iter_getter (H5DataGetter):
         """
@@ -120,11 +149,12 @@ class H5DataGetter(AbstractIteratorBuilder):
         assert filename_dict.keys() == img_transform_dict.keys(), 'Keys disagree.'
         # Generate dataset map.
         datasets_dict: Dict[bool, H5SetBasic] = {
-                    x: H5SetBasic(filename_dict[x])
+                    x: H5SetBasic(filename_dict[x], group_level=group_level)
                     for x in filename_dict.keys()
         }
         # instantiation
-        return cls(datasets=datasets_dict, img_transform_dict=img_transform_dict, skip_class=skip_class)
+        return cls(datasets=datasets_dict, img_transform_dict=img_transform_dict, skip_class=skip_class,
+                   group_level=group_level)
         # {True: None, False: None}
 
     @property
@@ -165,6 +195,7 @@ class H5DataGetter(AbstractIteratorBuilder):
         Returns:
 
         """
+        assert self.group_level == 0 or batch_size == 1, f'group_level 1 only supports batch_of_1'
         if shuffle is None:
             shuffle = mode
         return DataLoader(self.datasets_collection[mode], num_workers=num_workers, pin_memory=pin_memory,
