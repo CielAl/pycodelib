@@ -2,11 +2,12 @@ import tables
 import numpy as np
 import torch
 from torch.utils.data import Dataset as TorchDataset
-from typing import Sequence, Callable
+from typing import Sequence, Callable, List, Union
 from pycodelib import common
 from openslide import OpenSlide
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.setLevel(level=logging.DEBUG)
 # from abc import ABC, abstractmethod
 
 
@@ -29,8 +30,15 @@ class H5SetBasic(TorchDataset):
     def types(self):
         return self._types
 
-    def __init__(self, filename: str, types: Sequence[str] = None):
+    @classmethod
+    def build_from_db(cls, database, phase, group_level: int = 0):
+        table_file_name = database.generate_table_name(phase)[0]
+        types = database.types
+        return cls(table_file_name, types, group_level=group_level)
+
+    def __init__(self, filename: str, types: Sequence[str] = None, group_level:int = 0):
         self._filename = filename
+        self._group_level = group_level
         with tables.open_file(self.filename, 'r') as db:
             if hasattr(db.root, 'types'):
                 self._types = [x.decode('utf-8') for x in db.root.types[:]]
@@ -57,25 +65,38 @@ class H5SetBasic(TorchDataset):
             img = img[None, ]
         return img
 
+    @staticmethod
+    def _flatten_group(grouped_data: List):
+        length = len(grouped_data)
+        if length == 0:
+            result = grouped_data
+        elif length == 1:
+            result = grouped_data[0]
+        else:
+            result = [x[0] for x in grouped_data]
+        return result
+
     def __getitem__(self, index):
         with tables.open_file(self.filename, 'r') as db:
             # img_list = getattr(db.root, self.types[0])
             # label_list = getattr(db.root, self.types[1])
             data_list = [getattr(db.root, x) for x in self.types]
             filename_list = getattr(db.root, 'filename')
-            img = data_list[0][index, ]
-            label = data_list[1][index, ]
-            filenames = filename_list[index, ]
+            filenames = filename_list[index, ]  # filenames is unaffected
             data_out = [data_array[index, ] for data_array in data_list]
-        if isinstance(index, slice):
+            if self._group_level == 1:
+                filenames = H5SetBasic._flatten_group(filenames)
+                data_out = H5SetBasic._flatten_group(data_out)
+
+        if isinstance(index, slice) or isinstance(filenames, np.ndarray):
+            breakpoint()
             filenames = [x.decode('utf-8') for x in filenames]
         else:
             filenames = filenames.decode('utf-8')
         if isinstance(index, slice):
             index_out = type(self).slice2array(index, len(self))
         else:
-            index_out = np.asarray(index)
-
+            index_out = np.asarray([index]).ravel()
         # image
         data_out[0] = H5SetBasic.dim_recovered_data(data_out[0])
         return tuple(data_out) + (filenames, index_out)

@@ -15,6 +15,9 @@ from pycodelib.metrics import label_binarize_group
 from pycodelib.patients import CascadedPred, SheetCollection
 from ..multi_instance_meter import MultiInstanceMeter
 from ..skeletal import EngineHooks
+import logging
+debug_logger = logging.getLogger(__name__)
+debug_logger.setLevel(logging.CRITICAL)
 
 # noinspection SpellCheckingInspection
 softmax: Callable = nn.Softmax(dim=1)
@@ -125,7 +128,7 @@ class AbstractModelStats(BaseModelStats, ABC):
             v.reset()
 
     def get_meter(self, name):
-        return self.meter_dict[name]
+        return self.meter_dict.get(name, None)
 
     def phase_name(self, state):
         phase = self.val_phases.get(state['train'], None)
@@ -154,7 +157,7 @@ class AbstractModelStats(BaseModelStats, ABC):
                 key = (name, phase)
                 self._viz_logger_dict[key] = viz_logger
 
-    def get_logger(self, name: str, phase: bool, raise_key: bool = True):
+    def get_logger(self, name: str, phase: bool, raise_key: bool = False):
         key = (name, phase)
         if raise_key:
             return self._viz_logger_dict[key]
@@ -163,7 +166,25 @@ class AbstractModelStats(BaseModelStats, ABC):
     def visualize_log(self, name, phase, *values):
         if self.is_visualize:
             viz_logger = self.get_logger(name, phase)
+            if viz_logger is None:
+                debug_logger.warning(f"Logger Not Found: {name}, {phase}")
+                return
             viz_logger.log(*values)
+
+    def meter_add_value(self, name, *values):
+        meter = self.get_meter(name)
+        if meter is None:
+            debug_logger.warning(f"Meter Not Found: {name}")
+            return
+        meter.add(*values)
+
+    def meter_get_value(self, name):
+        meter = self.get_meter(name)
+        if meter is None:
+            result = None
+        else:
+            result = meter.value()
+        return result
 
 
 class DefaultStats(AbstractModelStats):
@@ -183,13 +204,13 @@ class DefaultStats(AbstractModelStats):
     VIZ_MULTI_AUC: str = 'Patient_AUC'
 
     def __init__(self,
-                 patient_info: SheetCollection,
-                 patient_pred: CascadedPred,
                  sub_class_list: Sequence,
                  class_partition: Sequence[Union[int, Sequence[int]]],
                  positive_class: Sequence[int],
                  val_phases: Dict[bool, str] = None,
                  is_visualize: bool = True,
+                 patient_info: SheetCollection = None,
+                 patient_pred: CascadedPred = None,
                  port: int = AbstractModelStats.DEFAULT_PORT,
                  env: str = AbstractModelStats.DEFAULT_ENV
                  ):
@@ -213,13 +234,20 @@ class DefaultStats(AbstractModelStats):
         self.add_meter(DefaultStats.PATCH_ACC, ClassErrorMeter(accuracy=True))
         self.add_meter(DefaultStats.PATCH_CONF, ConfusionMeter(self.num_classes, normalized=False))
         self.add_meter(DefaultStats.LOSS_METER, AverageValueMeter())
-        self.add_meter(DefaultStats.MULTI_INSTANCE,
-                       MultiInstanceMeter(self.patient_info,
-                                          self.patient_pred,
-                                          positive_class=MultiInstanceMeter.default_positive(self.class_partition,
-                                                                                             self._positive_class)
-                                          )
-                       )
+        if self.patient_pred is not None and self.patient_info is not None:
+
+            self.add_meter(DefaultStats.MULTI_INSTANCE,
+                           MultiInstanceMeter(self.patient_info,
+                                              self.patient_pred,
+                                              positive_class=MultiInstanceMeter.default_positive(self.class_partition,
+                                                                                                 self._positive_class)
+                                              )
+
+                           )
+            self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TPR)
+            self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TNR)
+            self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_AUC)
+
         self.add_meter(DefaultStats.PATCH_AUC, AUCMeter())
 
         self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_LOSS)
@@ -227,15 +255,14 @@ class DefaultStats(AbstractModelStats):
         self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_PATCH_TNR)
         self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_PATCH_AUC)
 
-        self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TPR)
-        self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TNR)
-        self.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_AUC)
-
     def update_membership(self, scores, index):
         # debug the memory leak
         # self.membership.update(score_dict)
         # index is also a tensor!
         for ind, score_row in zip(index, scores):
+            # breakpoint()
+            if isinstance(ind, np.ndarray) and ind.size == 1:
+                ind = ind.ravel()[0]
             self.membership[ind] = score_row  # .max()
 
     @property
@@ -311,10 +338,10 @@ class DefaultStats(AbstractModelStats):
         label: torch.LongTensor = self.label_collator(label_in).type("torch.LongTensor")
 
         # Add Loss Measurements per batch
-        self.get_meter(DefaultStats.LOSS_METER).add(loss_scalar)
+        self.meter_add_value(DefaultStats.LOSS_METER, loss_scalar)
         # Add accuracy (patch) per batch
         # todo check length of label
-        self.get_meter(DefaultStats.PATCH_ACC).add(pred_data, label)
+        self.meter_add_value(DefaultStats.PATCH_ACC, pred_data, label)
 
         # If 1-d vector (in case of batch-of-one), adding leading singleton dim.
         # Otherwise the confusion_meter may mistreat the 1-d vector as a vector of
@@ -322,7 +349,7 @@ class DefaultStats(AbstractModelStats):
         if pred_data.ndimension == 1:
             pred_data = pred_data[None]
 
-        self.get_meter(DefaultStats.PATCH_CONF).add(pred_data, label)
+        self.meter_add_value(DefaultStats.PATCH_CONF, pred_data, label)
 
         # Posterior score
         pred_softmax = np.atleast_2d(softmax(pred_data).data.detach().cpu().numpy().squeeze())
@@ -330,13 +357,16 @@ class DefaultStats(AbstractModelStats):
         """ 
             Note: the score per sample (single data point) is not reduced. Values of all categories are retained.
         """
-        self.get_meter(DefaultStats.MULTI_INSTANCE).add(patch_name_score)
+        self.meter_add_value(DefaultStats.MULTI_INSTANCE, patch_name_score)
+        # multi_instance_meter = self.get_meter(DefaultStats.MULTI_INSTANCE)
+        # if multi_instance_meter is not None:
+        #    multi_instance_meter.add(patch_name_score)
 
         # todo multiclass generalization: use label_binarize in sklearn, or simply
         # if self.num_classes == 2:
         score_numpy = np.atleast_1d(pred_softmax[:, 1])
         label_numpy = np.atleast_1d(label.cpu().squeeze().numpy())
-        self.get_meter(DefaultStats.PATCH_AUC).add(score_numpy, label_numpy)
+        self.meter_add_value(DefaultStats.PATCH_AUC, score_numpy, label_numpy)
 
     def on_start(self, state: Dict[str, Any], *args, **kwargs):
         self.reset_meters()
@@ -359,14 +389,17 @@ class DefaultStats(AbstractModelStats):
         if phase is None:
             #  skip
             return
-        conf_mat, roc_auc_dict, raw_data = \
-            self.get_meter(DefaultStats.MULTI_INSTANCE).value()
 
         loss = self.get_meter(DefaultStats.LOSS_METER).value()[0]
         patch_acc = self.get_meter(DefaultStats.PATCH_ACC).value()[0]
         patch_auc = self.get_meter(DefaultStats.PATCH_AUC).value()[0]
         patch_conf = self.get_meter(DefaultStats.PATCH_CONF).value()
+        patch_conf_norm: np.ndarray = patch_conf.astype('float') / patch_conf.sum(axis=1)[:, np.newaxis]
         # todo move to engine
+
+        # conf_mat, roc_auc_dict, raw_data = \
+        patient_meter_result = self.meter_get_value(DefaultStats.MULTI_INSTANCE)
+
         if not state['train'] and loss < self._best_loss:
             self._best_loss = loss
             loss_mark = '*'
@@ -375,9 +408,7 @@ class DefaultStats(AbstractModelStats):
                 'patch_acc': patch_acc,
                 'patch_auc': patch_auc,
                 'patch_conf': patch_conf,
-                'roc_auc_dict': roc_auc_dict,
-                'patient_conf': conf_mat,
-                'raw_data': raw_data
+                'patient_meter_result': patient_meter_result,
             })
             engine: AbstractEngine = state['network']
             pickle_full = engine.dump_file_name('best_stat', 'pickle')
@@ -400,19 +431,26 @@ class DefaultStats(AbstractModelStats):
             f"Loss:= {loss:.5f}{loss_mark} " \
             f"Patch accuracy:= {patch_acc:.2f}  " \
             f"Patch AUC:= {patch_auc:.2f}"
-        patient_lvl_data = roc_auc_dict[1]
-        patient_verbose = f"phase - {phase}. Patient AUC: {patient_lvl_data.get('auc', 'Not available')} "
         print(basic_verbose)
-        print(patient_verbose)
         print(patch_conf)
-        print(conf_mat)
 
-        patch_conf_norm: np.ndarray = patch_conf.astype('float') / patch_conf.sum(axis=1)[:, np.newaxis]
-        multi_conf_norm: np.ndarray = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
+        tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
+        if self.get_meter(DefaultStats.MULTI_INSTANCE) is not None:
+            conf_mat, roc_auc_dict, raw_data = patient_meter_result
+            patient_lvl_data = roc_auc_dict[1]
+            patient_verbose = f"phase - {phase}. Patient AUC: {patient_lvl_data.get('auc', 'Not available')} "
+            print(patient_verbose)
+            print(patch_conf)
+            print(conf_mat)
+            self.visualize_log(DefaultStats.VIZ_MULTI_AUC, state['train'],
+                               self.epoch_count,
+                               patient_lvl_data.get('auc', 0))
+            multi_conf_norm: np.ndarray = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
+            tn_multi, fp_multi, fn_multi, tp_multi = multi_conf_norm.ravel()
+        else:
+            tn_multi, fp_multi, fn_multi, tp_multi = (None, None, None, None)
 
         if self.num_classes <= 2:
-            tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
-            tn_multi, fp_multi, fn_multi, tp_multi = multi_conf_norm.ravel()
             self.visualize_log(DefaultStats.VIZ_PATCH_TPR, state['train'], self.epoch_count, tp_patch)
             self.visualize_log(DefaultStats.VIZ_PATCH_TNR, state['train'], self.epoch_count, tn_patch)
             self.visualize_log(DefaultStats.VIZ_MULTI_TPR, state['train'], self.epoch_count, tp_multi)
@@ -421,7 +459,5 @@ class DefaultStats(AbstractModelStats):
         self.visualize_log(DefaultStats.VIZ_LOSS, state['train'], self.epoch_count, loss)
 
         self.visualize_log(DefaultStats.VIZ_PATCH_AUC, state['train'], self.epoch_count, patch_auc)
-        self.visualize_log(DefaultStats.VIZ_MULTI_AUC, state['train'],
-                           self.epoch_count,
-                           patient_lvl_data.get('auc', 0))
+
         # moved to on_start

@@ -52,7 +52,7 @@ class BaseEngine(AbstractEngine):
             dummy = self.dummy
             return dummy, dummy
         img, label_in, *rest = data_batch
-        img = img.to(self.device)
+        img = img.type('torch.FloatTensor').to(self.device)
         label = self.label_collator(label_in).type('torch.LongTensor').to(self.device)
         prediction = self.model(img)
         loss = self.loss(prediction, label)
