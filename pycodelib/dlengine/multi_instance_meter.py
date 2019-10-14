@@ -227,12 +227,18 @@ class MultiInstanceMeter(Meter):
         conf_pred_label = scores_all_class.argmax(axis=1)
 
         conf_mat = confusion_matrix(true_labels, conf_pred_label)
+        conf_mat_norm = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
         if not self.binarize:
             roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, self._positive_class)
         else:
             roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, [1])
         # breakpoint()
-        return conf_mat, roc_auc_dict, raw_data
+        return {
+            'conf_mat': conf_mat,
+            'conf_mat_norm': conf_mat_norm,
+            'roc_auc_dict': roc_auc_dict,
+            'raw_data': raw_data,
+        }
 
     def reset(self):
         """

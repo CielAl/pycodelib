@@ -5,6 +5,7 @@ from .skeletal import AbstractEngine, AbstractIteratorBuilder
 from typing import Tuple, Dict, Any, List
 import torch
 import torch.nn as nn
+from torch.optim.optimizer import Optimizer
 from tqdm import tqdm
 from pycodelib.debug import Debugger
 from .model_stats import AbstractModelStats
@@ -22,10 +23,13 @@ class BaseEngine(AbstractEngine):
                  iterator_getter: AbstractIteratorBuilder,
                  model_stats: AbstractModelStats,
                  model_export_path: str = '.',
-                 engine_name: str = ''
+                 engine_name: str = '',
+                 optimizer: Optimizer = None
                  ):
 
-        super().__init__(device, model, loss, iterator_getter, model_export_path, engine_name=engine_name)
+        super().__init__(device, model, loss, iterator_getter, model_export_path,
+                         engine_name=engine_name,
+                         optimizer=optimizer)
 
         self.model_stats: AbstractModelStats = model_stats
         # debug
