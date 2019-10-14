@@ -89,7 +89,6 @@ class H5SetBasic(TorchDataset):
                 data_out = H5SetBasic._flatten_group(data_out)
 
         if isinstance(index, slice) or isinstance(filenames, np.ndarray):
-            breakpoint()
             filenames = [x.decode('utf-8') for x in filenames]
         else:
             filenames = filenames.decode('utf-8')

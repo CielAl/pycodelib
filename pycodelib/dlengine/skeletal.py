@@ -248,7 +248,8 @@ class AbstractEngine(Callable, EngineHooks):
                  loss: nn.Module,
                  iterator_getter: AbstractIteratorBuilder,
                  model_export_path: str,
-                 engine_name: str = ''):
+                 engine_name: str = '',
+                 optimizer: Optimizer = None):
         """
 
         Args:
@@ -260,7 +261,7 @@ class AbstractEngine(Callable, EngineHooks):
         super().__init__()
         # Initializing the maxepoch field.
         self._maxepoch: int = -1
-        self._optimizer: Optimizer = None
+        self._optimizer: Optimizer = optimizer
         # The torchnet.engine object.
         # The device which host the model and all variables.
         self.device: torch.device = device
@@ -276,7 +277,8 @@ class AbstractEngine(Callable, EngineHooks):
         self.engine_name = engine_name
         # Empty Meter storage.
 
-    def process(self, maxepoch: int, optimizer: Optimizer, batch_size: int = 4, num_workers: int = 0):
+    def process(self, maxepoch: int = -1, optimizer: Optimizer = None, batch_size: int = 4, num_workers: int = 0,
+                mode: bool = True):
         """
             The exposed interface to user, which is an encapsulation of engine.train, where the 1st callable
              parameter of engine.train is self (i.e. defined by __call__)
@@ -291,15 +293,21 @@ class AbstractEngine(Callable, EngineHooks):
         debugger.log("process start")
         self._maxepoch = maxepoch
         self._optimizer = optimizer
-        self.engine.train(self,
-                          self.iterator_getter.get_iterator(
-                                                            mode=True,
-                                                            shuffle=True,
-                                                            batch_size=batch_size,
-                                                            num_workers=num_workers
-                                                            ),
-                          maxepoch=self._maxepoch,
-                          optimizer=optimizer)
+        dl = self.iterator_getter.get_iterator(
+            mode=mode,
+            shuffle=True,
+            batch_size=batch_size,
+            num_workers=num_workers
+        )
+        if mode:
+            assert self._maxepoch > 0
+            assert optimizer is not None
+            self.engine.train(self,
+                              dl,
+                              maxepoch=self._maxepoch,
+                              optimizer=optimizer)
+        else:
+            self.engine.test(self, dl)
 
     def label_collator(self, labels):
         raise NotImplemented
