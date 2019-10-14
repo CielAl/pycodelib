@@ -19,8 +19,7 @@ import logging
 debug_logger = logging.getLogger(__name__)
 debug_logger.setLevel(logging.CRITICAL)
 
-# noinspection SpellCheckingInspection
-softmax: Callable = nn.Softmax(dim=1)
+__all__ = ['AbstractModelStats', 'DefaultStats']
 
 
 class _DictContainer(ABC):
@@ -158,10 +157,12 @@ class AbstractModelStats(BaseModelStats, ABC):
                  val_phases: Dict[bool, str] = None,
                  is_visualize: bool = True,
                  port: int = DEFAULT_PORT,
-                 env: str = DEFAULT_ENV
+                 env: str = DEFAULT_ENV,
+                 previous_preds=None,
                  ):
         super().__init__()
         self._membership = None  # todo - EM
+        self._previous_preds = previous_preds
         self.sub_class_list = sub_class_list
         self.class_partition: np.ndarray = np.asarray(class_partition)
         self._is_visualize = is_visualize
@@ -179,7 +180,6 @@ class AbstractModelStats(BaseModelStats, ABC):
         # and use the state['epoch'] in the training phase + test result that are not yet reset in the meter
         # however, it makes the code even less readable, as there is even stronger semantic coupling
         # to the control flow of torchnet.engine
-        # todo So simply count the epoch value here.
         self.__epoch_count: int = 0
 
     @abstractmethod
@@ -234,11 +234,9 @@ class DefaultStats(AbstractModelStats):
 
     VIZ_LOSS: str = 'Loss'
     VIZ_PATCH_TRUE_PRED: str = 'Patch_TRUE_PRED'
-    VIZ_PATCH_TNR: str = 'Patch_TNR'
     VIZ_PATCH_AUC: str = 'Patch_AUC'
 
-    VIZ_MULTI_TPR: str = 'Patient_TPR'
-    VIZ_MULTI_TNR: str = 'Patient_TPR'
+    VIZ_MULTI_TRUE_PRED: str = 'Patient_TRUE_PRED'
     VIZ_MULTI_AUC: str = 'Patient_AUC'
 
     def __init__(self,
@@ -250,14 +248,16 @@ class DefaultStats(AbstractModelStats):
                  patient_info: SheetCollection = None,
                  patient_pred: CascadedPred = None,
                  port: int = AbstractModelStats.DEFAULT_PORT,
-                 env: str = AbstractModelStats.DEFAULT_ENV
+                 env: str = AbstractModelStats.DEFAULT_ENV,
+                 previous_preds=None
                  ):
         super().__init__(sub_class_list=sub_class_list,
                          class_partition=class_partition,
                          val_phases=val_phases,
                          is_visualize=is_visualize,
                          port=port,
-                         env=env
+                         env=env,
+                         previous_preds=previous_preds,
                          )
         self.patient_info = patient_info
         self.patient_pred = patient_pred
@@ -273,8 +273,9 @@ class DefaultStats(AbstractModelStats):
         self.meter_container.add_meter(DefaultStats.PATCH_ACC, ClassErrorMeter(accuracy=True))
         self.meter_container.add_meter(DefaultStats.PATCH_CONF, ConfusionMeter(self.num_classes, normalized=False))
         self.meter_container.add_meter(DefaultStats.LOSS_METER, AverageValueMeter())
-        if self.patient_pred is not None and self.patient_info is not None:
+        self.meter_container.add_meter(DefaultStats.PATCH_AUC, AUCMeter())
 
+        if self.patient_pred is not None and self.patient_info is not None:
             self.meter_container.add_meter(DefaultStats.MULTI_INSTANCE,
                                            MultiInstanceMeter(self.patient_info,
                                                               self.patient_pred,
@@ -282,16 +283,11 @@ class DefaultStats(AbstractModelStats):
                                                                   self.class_partition,
                                                                   self._positive_class
                                                               )))
-
-            self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TPR)
-            self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TNR)
+            self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_TRUE_PRED)
             self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_MULTI_AUC)
-
-        self.meter_container.add_meter(DefaultStats.PATCH_AUC, AUCMeter())
 
         self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_LOSS)
         self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_PATCH_TRUE_PRED)
-        self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_PATCH_TNR)
         self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_PATCH_AUC)
 
     def update_membership(self, scores, index):
@@ -365,6 +361,7 @@ class DefaultStats(AbstractModelStats):
         Returns:
 
         """
+        softmax: Callable = nn.Softmax(dim=1)
         # retrieve prediction and loss.
 
         # pred_data as the output score. Shape: N samples * M classes.
@@ -372,7 +369,7 @@ class DefaultStats(AbstractModelStats):
         loss_scalar: torch.Tensor = state['loss'].data.detach().cpu()
 
         # retrieve input data
-        # strong coupling - todo fix later
+        # strong coupling - todo fix later:
         img_new, label_in, mask, row, col, img, filename, *rest = state['sample']
         label: torch.LongTensor = self.label_collator(label_in).type("torch.LongTensor")
 
@@ -401,7 +398,7 @@ class DefaultStats(AbstractModelStats):
         # if multi_instance_meter is not None:
         #    multi_instance_meter.add(patch_name_score)
 
-        # todo multiclass generalization: use label_binarize in sklearn, or simply
+        # todo multiclass generalization: use label_binarize in sklearn
         # if self.num_classes == 2:
         score_numpy = np.atleast_1d(pred_softmax[:, 1])
         label_numpy = np.atleast_1d(label.cpu().squeeze().numpy())
@@ -494,14 +491,14 @@ class DefaultStats(AbstractModelStats):
             print(conf_mat)
             print(conf_mat_norm)
 
-    def __viz_accuracy(self, state, conf_norm: np.ndarray):
+    def __viz_accuracy(self, logger_name, state, conf_norm: np.ndarray):
         # tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
         if conf_norm is None:
             return
         class_accuracy_all = conf_norm.diagonal()
         for idx, class_acc in enumerate(class_accuracy_all):
             self.vizlog_container.\
-                visualize_log(DefaultStats.VIZ_PATCH_TRUE_PRED,
+                visualize_log(logger_name,
                               state['train'],
                               self.epoch_count, class_acc,
                               name=idx)
@@ -522,13 +519,12 @@ class DefaultStats(AbstractModelStats):
         # if train - assert the epoch count.
 
         assert not state['train'] or state['epoch'] == self.epoch_count
-        # todo test
+
         phase = self.phase_name(state)
         if phase is None:
             #  skip
             return
 
-        # todo move to engine
         patch_result: Dict = self.__patch_level_helper()
         patient_result: Dict = self.meter_container.meter_get_value(DefaultStats.MULTI_INSTANCE)
 
@@ -537,15 +533,16 @@ class DefaultStats(AbstractModelStats):
         # loss/acc/auc/conf
         self.__basic_verbose_helper_patch(phase, patch_result, is_best_loss)
         self.__basic_verbose_helper_patient(phase, patient_result=patient_result)
-        self.__viz_accuracy(state, patch_result.get('patch_conf_norm'))
-        self.__viz_accuracy(state, patient_result.get('conf_mat_norm'))
+        self.__viz_accuracy(DefaultStats.VIZ_PATCH_TRUE_PRED, state, patch_result.get('patch_conf_norm'))
+        self.__viz_accuracy(DefaultStats.VIZ_MULTI_TRUE_PRED, state, patient_result.get('conf_mat_norm'))
 
         loss = patch_result['loss']
-        patch_auc = patch_result['patch_auc']
-        patient_auc = -1 if patient_result is None else patient_result.get('auc', -1)
         self.vizlog_container.visualize_log(DefaultStats.VIZ_LOSS, state['train'], self.epoch_count, loss)
+
+        patch_auc = patch_result['patch_auc']
         self.vizlog_container.visualize_log(DefaultStats.VIZ_PATCH_AUC, state['train'], self.epoch_count, patch_auc)
 
+        patient_auc = -1 if patient_result is None else patient_result.get('auc', -1)
         self.vizlog_container.visualize_log(DefaultStats.VIZ_MULTI_AUC, state['train'],
                                             self.epoch_count,
                                             patient_auc)
