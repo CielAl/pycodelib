@@ -9,7 +9,9 @@ from torchnet.engine import Engine
 from abc import ABC, abstractmethod
 from torch.optim.optimizer import Optimizer
 import torch.nn as nn
+import numpy as np
 # from torch.utils.data import Dataset as TorchDataSet
+from pycodelib.dataset import AbstractDataset
 from pycodelib.debug import Debugger
 debugger = Debugger(__name__)
 debugger.level = None
@@ -22,7 +24,10 @@ class AbstractIteratorBuilder(ABC):
     BATCH_SIZE: int = 32
     @classmethod
     @abstractmethod
-    def get_iterator(cls, mode, shuffle, num_workers=4, drop_last=False,  pin_memory=True, batch_size=4) -> DataLoader:
+    def get_iterator(cls, mode, shuffle, num_workers=4, drop_last=False,  pin_memory=True, batch_size=4,
+                     truncate_size: float = np.inf,
+                     flatten_output: bool = False
+                     ) -> DataLoader:
         """
         Args:
             mode: True if train, otherwise False.
@@ -31,7 +36,8 @@ class AbstractIteratorBuilder(ABC):
             drop_last:  Drop the last batch if smaller than batch_size.
             pin_memory: Use pin memory (Details in DataLoader of pytorch)
             batch_size: Size of batch
-
+            truncate_size: See AbstractDataset
+            flatten_output: See AbstractDataset
         Returns:
             The DataLoader given the mode.
         """
@@ -39,7 +45,7 @@ class AbstractIteratorBuilder(ABC):
 
     @property
     @abstractmethod
-    def datasets_collection(self):
+    def data_sets_collection(self):
         """
         Returns:
             The field which contains all dataset, corresponding to all modes.
@@ -249,7 +255,11 @@ class AbstractEngine(Callable, EngineHooks):
                  iterator_getter: AbstractIteratorBuilder,
                  model_export_path: str,
                  engine_name: str = '',
-                 optimizer: Optimizer = None):
+                 optimizer: Optimizer = None,
+                 img_key: str = None,
+                 label_key: str = None,
+                 filename_key: str = None,
+                 index_key: str = None):
         """
 
         Args:
@@ -259,6 +269,9 @@ class AbstractEngine(Callable, EngineHooks):
             iterator_getter:    The DataLoader assignment by mode.
         """
         super().__init__()
+
+        # cache the kwargs arguments of dataloader (for testing)
+        self._test_data_loader_kwargs_cache = dict()
         # Initializing the maxepoch field.
         self._maxepoch: int = -1
         self._optimizer: Optimizer = optimizer
@@ -275,10 +288,17 @@ class AbstractEngine(Callable, EngineHooks):
         if not os.path.exists(self.model_export_path):
             os.mkdir(self.model_export_path)
         self.engine_name = engine_name
+
+        self.img_key: str = img_key
+        self.label_key: str = label_key
+        self.filename_key: str = filename_key
+        self.index_key: str = index_key
         # Empty Meter storage.
 
     def process(self, maxepoch: int = -1, optimizer: Optimizer = None, batch_size: int = 4, num_workers: int = 0,
-                mode: bool = True):
+                mode: bool = True,
+                flatten_output: bool = False,
+                truncate_size: Dict[bool, float] = None):
         """
             The exposed interface to user, which is an encapsulation of engine.train, where the 1st callable
              parameter of engine.train is self (i.e. defined by __call__)
@@ -287,18 +307,33 @@ class AbstractEngine(Callable, EngineHooks):
             optimizer:
             num_workers:
             batch_size:
+            mode (bool):
+            flatten_output:
+            truncate_size:
         Returns:
 
         """
         debugger.log("process start")
         self._maxepoch = maxepoch
         self._optimizer = optimizer
+        if truncate_size is None:
+            truncate_size = {k: np.inf for k in [True, False]}
+
         dl = self.iterator_getter.get_iterator(
             mode=mode,
             shuffle=True,
             batch_size=batch_size,
-            num_workers=num_workers
+            num_workers=num_workers,
+            truncate_size=truncate_size[mode],
+            flatten_output=flatten_output
+
         )
+        self._test_data_loader_kwargs_cache = {
+            'batch_size': batch_size,
+            'num_workers': num_workers,
+            'truncate_size': truncate_size[False],
+            'flatten_output': flatten_output
+        }
         if mode:
             assert self._maxepoch > 0
             assert optimizer is not None
@@ -311,3 +346,45 @@ class AbstractEngine(Callable, EngineHooks):
 
     def label_collator(self, labels):
         raise NotImplemented
+
+
+class IteratorBuilderDictSet(AbstractIteratorBuilder):
+    @staticmethod
+    def __validate_dataset_dict(data_sets):
+        for x in data_sets.values():
+            if not isinstance(x, AbstractDataset):
+                raise TypeError(f"Expect AbstractDataset. Got {type(data_sets)}")
+
+    @property
+    def data_sets_collection(self):
+        """
+
+        Returns:
+            Collection of Datasets per mode.
+        """
+        return self._data_sets_collection
+
+    def __init__(self, data_sets: Dict[bool, AbstractDataset]):
+        super().__init__()
+        IteratorBuilderDictSet.__validate_dataset_dict(data_sets)
+        self._data_sets_collection: Dict[bool, AbstractDataset] = data_sets
+
+    @classmethod
+    @abstractmethod
+    def get_iterator(cls, mode, shuffle, num_workers=4, drop_last=False,  pin_memory=True, batch_size=4,
+                     truncate_size: float = np.inf,
+                     flatten_output: bool = False) -> DataLoader:
+        """
+        Args:
+            mode: True if train, otherwise False.
+            shuffle: True if data are shuffled each epoch.
+            num_workers: Number of CPU.
+            drop_last:  Drop the last batch if smaller than batch_size.
+            pin_memory: Use pin memory (Details in DataLoader of pytorch)
+            batch_size: Size of batch
+            truncate_size:
+            flatten_output:
+        Returns:
+            The DataLoader given the mode.
+        """
+        ...

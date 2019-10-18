@@ -2,7 +2,8 @@
     The basic implementation of engines.
 """
 from .skeletal import AbstractEngine, AbstractIteratorBuilder
-from typing import Tuple, Dict, Any, List
+from pycodelib.dataset import DatasetItem, DataItemUnpackByVal
+from typing import Tuple, Dict, Any, List, Union, Sequence
 import torch
 import torch.nn as nn
 from torch.optim.optimizer import Optimizer
@@ -13,6 +14,12 @@ import pickle
 
 
 class BaseEngine(AbstractEngine):
+    KEY_IMG: str = 'img'
+    KEY_label: str = 'label'
+    KEY_FILENAME: str = 'filename'
+    KEY_INDEX = 'index'
+
+    KEY_MODE = 'mode'
     """
         Engine for the skin cancer project. Patient-level.
     """
@@ -24,13 +31,20 @@ class BaseEngine(AbstractEngine):
                  model_stats: AbstractModelStats,
                  model_export_path: str = '.',
                  engine_name: str = '',
-                 optimizer: Optimizer = None
+                 optimizer: Optimizer = None,
+                 img_key: str = KEY_IMG,
+                 label_key: str = KEY_label,
+                 filename_key: str = KEY_FILENAME,
+                 index_key: str = KEY_INDEX
                  ):
 
         super().__init__(device, model, loss, iterator_getter, model_export_path,
                          engine_name=engine_name,
-                         optimizer=optimizer)
-
+                         optimizer=optimizer,
+                         img_key=img_key,
+                         label_key=label_key,
+                         filename_key=filename_key,
+                         index_key=index_key)
         self.model_stats: AbstractModelStats = model_stats
         # debug
         self.debugger = Debugger(__name__)
@@ -41,7 +55,13 @@ class BaseEngine(AbstractEngine):
     def label_collator(self, labels):
         return self.model_stats.label_collator(labels)
 
-    def model_eval(self, data_batch: List) -> Tuple[torch.Tensor, torch.Tensor]:
+    @staticmethod
+    def __empty_batch(data_batch: Union[Sequence, DataItemUnpackByVal]):
+        if isinstance(data_batch, Sequence):
+            return len(data_batch) == 0 or len(data_batch[1]) == 0
+        return len(data_batch) == 0
+
+    def model_eval(self, data_batch: Union[List, DataItemUnpackByVal]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
         Args:
@@ -52,15 +72,18 @@ class BaseEngine(AbstractEngine):
             prediction: the prediction of the output layer
         """
         # (img), label, mask, row, col, img_original, filenames, index, train_flag
-        if len(data_batch) == 0 or len(data_batch[1]) == 0:
-            dummy = self.dummy
-            return dummy, dummy
-        img, label_in, *rest = data_batch
+        if BaseEngine.__empty_batch(data_batch):
+            return self.dummy, self.dummy
+
+        img = data_batch[self.img_key]
+        label_in = data_batch[self.label_key]
+        index = data_batch[self.index_key].cpu().detach().numpy()
+
         img = img.type('torch.FloatTensor').to(self.device)
         label = self.label_collator(label_in).type('torch.LongTensor').to(self.device)
         prediction = self.model(img)
         loss = self.loss(prediction, label)
-        index = rest[-2].cpu().detach().numpy()
+
         softmax = nn.Softmax(dim=1)
         score = softmax(prediction).cpu().detach().numpy()
         self.model_stats.update_membership(score, index)
@@ -107,7 +130,9 @@ class BaseEngine(AbstractEngine):
             state['valid_sample'] = False
             return
         state['valid_sample'] = True
-        state['sample'].append(state['train'])
+
+        state['sample'] = DataItemUnpackByVal(DatasetItem(state['sample']))
+        state['sample'][BaseEngine.KEY_MODE] = state['train']
         self.model_stats.hook(self.on_sample.__name__, state)
         self.model.train(state['train'])
 
@@ -169,7 +194,8 @@ class BaseEngine(AbstractEngine):
         state['train'] = False
         torch.cuda.empty_cache()
         self.on_end_epoch_checkpoint_helper(state)
-        self.engine.test(self, self.iterator_getter.get_iterator(mode=False, shuffle=False))
+        self.engine.test(self, self.iterator_getter.get_iterator(mode=False, shuffle=False,
+                                                                 **self._test_data_loader_kwargs_cache))
         # must revert it back
         state['train'] = True
 
