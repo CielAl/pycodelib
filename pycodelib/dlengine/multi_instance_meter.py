@@ -64,6 +64,11 @@ class MultiInstanceMeter(Meter):
         self._positive_class = positive_class
         # self.label_collate = default_not_none(label_collate, self.default_label_collate)
         self.binarize = binarize
+        self._num_classes = len(self._patient_pred.class_list)
+
+    @property
+    def num_classes(self):
+        return self._num_classes
 
     @classmethod
     def build(cls,
@@ -181,6 +186,7 @@ class MultiInstanceMeter(Meter):
             todo Move the fetch_prediction here.
         Returns:
             todo: score and pred
+            true_labels are already curated and mapped (from group partition)
         """
         # for each v: List of array<prob_c1, prob_c2, ..., prob_cn>
         # values: List of v
@@ -192,6 +198,7 @@ class MultiInstanceMeter(Meter):
         scores_all_category: List = [np.asarray(scores_per_roi).mean(axis=0)
                                      for scores_per_roi in scores_all_category_roi_collection]
         # class name
+  
         self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
         score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
         # noinspection PyUnresolvedReferences
@@ -226,8 +233,9 @@ class MultiInstanceMeter(Meter):
         }
         conf_pred_label = scores_all_class.argmax(axis=1)
 
-        conf_mat = confusion_matrix(true_labels, conf_pred_label)
+        conf_mat = confusion_matrix(true_labels, conf_pred_label, range(self.num_classes))
         conf_mat_norm = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
+        conf_mat_norm = np.nan_to_num(conf_mat_norm)
         if not self.binarize:
             roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, self._positive_class)
         else:

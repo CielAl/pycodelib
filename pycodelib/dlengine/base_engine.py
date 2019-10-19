@@ -82,9 +82,11 @@ class BaseEngine(AbstractEngine):
         img = img.type('torch.FloatTensor').to(self.device)
         label = self.label_collator(label_in).type('torch.LongTensor').to(self.device)
         prediction = self.model(img)
+
         loss = self.loss(prediction, label)
 
         softmax = nn.Softmax(dim=1)
+
         score = softmax(prediction).cpu().detach().numpy()
         self.model_stats.update_membership(score, index)
         return loss, prediction

@@ -1,7 +1,7 @@
 import pickle
 from abc import ABC, abstractmethod
 from typing import Set, Dict, Any, Sequence, Union, Callable, Tuple
-
+from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,7 +12,7 @@ from torchnet.meter.meter import Meter
 
 from pycodelib.common import require_not_none
 from pycodelib.dlengine.skeletal import AbstractEngine
-from pycodelib.metrics import label_binarize_group
+from pycodelib.metrics import label_binarize_group, label_encode_by_partition
 from pycodelib.patients import CascadedPred, SheetCollection
 from ..multi_instance_meter import MultiInstanceMeter
 from ..skeletal import EngineHooks
@@ -149,6 +149,9 @@ class VizLogContainer(object):
         Returns:
 
         """
+        # values contains None:
+        if not all((None, None)):
+            return
         if self.is_visualize:
             key = (meter_name, phase)
             self._viz_logger_dict.act(key, 'log', False, *values, **kwargs)
@@ -178,8 +181,8 @@ class AbstractModelStats(BaseModelStats, ABC):
         self._previous_preds = previous_preds
         self.sub_class_list = sub_class_list
         # object array (data type=list)
-        self.class_partition: np.ndarray = np.asarray(class_partition)
-        assert len(self.sub_class_list) == self.class_partition.size, f"# of Class disagree with class partition" \
+        self.class_partition: Sequence[Sequence[int]] = deepcopy(class_partition)
+        assert len(self.sub_class_list) == len(self.class_partition), f"# of Class disagree with class partition" \
             f"{self.sub_class_list} vs. {self.class_partition}"
         self._is_visualize = is_visualize
         # self._viz_logger_dict: Dict[Tuple[str, bool], Any] = dict()
@@ -285,9 +288,8 @@ class DefaultStats(AbstractModelStats):
         self._best_stats = dict()
         # class_list=sub_class_list,
         # partition=self.class_partition)
-        self.num_classes: int = self.class_partition.size
+        self.num_classes: int = len(self.class_partition)
         self._membership: Dict[str, Union[torch.Tensor, np.ndarray]] = dict()
-
         self.meter_container.add_meter(DefaultStats.PATCH_ACC, ClassErrorMeter(accuracy=True))
         self.meter_container.add_meter(DefaultStats.PATCH_CONF, ConfusionMeter(self.num_classes, normalized=False))
         self.meter_container.add_meter(DefaultStats.LOSS_METER, AverageValueMeter())
@@ -370,7 +372,16 @@ class DefaultStats(AbstractModelStats):
         """
         ...
 
-    def label_collator(self, label_in, **kwargs):
+    def label_collator_bin(self, label_in):
+        """
+        This only works when one of the two partition contains only one label, e.g.
+        [[5,2,3], [1]]
+        Args:
+            label_in ():
+
+        Returns:
+
+        """
         part_min = min([min(x) for x in self.class_partition])
         part_max = max([max(x) for x in self.class_partition])
         assert part_min <= label_in.max() <= part_max \
@@ -380,6 +391,20 @@ class DefaultStats(AbstractModelStats):
         label = label_in
         label = label_binarize_group(label, anchor_group=self.positive_class, anchor_positive=True)
         return label
+
+    def label_collator(self, label_in, **kwargs):
+        """
+
+        Args:
+            label_in ():
+            **kwargs ():
+
+        Returns:
+            labels (torch.Tensor):
+        """
+        # more generalized
+        labels = label_encode_by_partition(label_in, self.class_partition)
+        return torch.from_numpy(labels)
 
     def on_forward(self, state: Dict[str, Any], **kwargs):
         """
@@ -419,7 +444,6 @@ class DefaultStats(AbstractModelStats):
         # score of positive classes.
         if pred_data.ndimension == 1:
             pred_data = pred_data[None]
-
         self.meter_container.meter_add_value(DefaultStats.PATCH_CONF, pred_data, label)
 
         # Posterior score
@@ -427,6 +451,7 @@ class DefaultStats(AbstractModelStats):
         patch_name_score: Tuple = (filename, pred_softmax)
         """ 
             Note: the score per sample (single data point) is not reduced. Values of all categories are retained.
+            Ignored if there is no multi-instance meter.
         """
         self.meter_container.meter_add_value(DefaultStats.MULTI_INSTANCE, patch_name_score)
         # multi_instance_meter = self.get_meter(DefaultStats.MULTI_INSTANCE)
@@ -434,10 +459,14 @@ class DefaultStats(AbstractModelStats):
         #    multi_instance_meter.add(patch_name_score)
 
         # todo multiclass generalization: use label_binarize in sklearn
-        # if self.num_classes == 2:
-        score_numpy = np.atleast_1d(pred_softmax[:, 1])
-        label_numpy = np.atleast_1d(label.cpu().squeeze().numpy())
-        self.meter_container.meter_add_value(DefaultStats.PATCH_AUC, score_numpy, label_numpy)
+        # todo however, I would assume the one vs. rest AUC in multi-class case can be highly misleading
+        # todo since the one vs. rest AUC can be high by sacrificing performance on other classes.
+        # todo in binary case, this poses as an abnormal threshold, while in multi-class case, it cannot be
+        # todo avoided by using any single thresholds.
+        if self.num_classes == 2:
+            score_numpy = np.atleast_1d(pred_softmax[:, 1])
+            label_numpy = np.atleast_1d(label.cpu().squeeze().numpy())
+            self.meter_container.meter_add_value(DefaultStats.PATCH_AUC, score_numpy, label_numpy)
 
     def on_start(self, state: Dict[str, Any], *args, **kwargs):
         self.meter_container.reset_meters()
@@ -479,7 +508,8 @@ class DefaultStats(AbstractModelStats):
     def __patch_level_helper(self):
         loss = self.meter_container.meter_get_value(DefaultStats.LOSS_METER, raise_flag=True)[0]
         patch_acc = self.meter_container.meter_get_value(DefaultStats.PATCH_ACC, raise_flag=True)[0]
-        patch_auc = self.meter_container.meter_get_value(DefaultStats.PATCH_AUC, raise_flag=True)[0]
+        patch_auc = self.meter_container.meter_get_value(DefaultStats.PATCH_AUC, raise_flag=True)[0] \
+            if self.num_classes == 2 else None
         patch_conf = self.meter_container.meter_get_value(DefaultStats.PATCH_CONF, raise_flag=True)
         patch_conf_norm: np.ndarray = patch_conf.astype('float') / patch_conf.sum(axis=1)[:, np.newaxis]
         result_dict: Dict[str, Any] = {
@@ -491,6 +521,12 @@ class DefaultStats(AbstractModelStats):
         }
         return result_dict
 
+    @staticmethod
+    def _invalid_value_to_nan(val):
+        if val is None:
+            return np.nan
+        return val
+
     def __basic_verbose_helper_patch(self, phase,
                                      patch_result: Dict,
                                      best_flag: bool,
@@ -498,11 +534,11 @@ class DefaultStats(AbstractModelStats):
         marker = '**' if best_flag else ''
         epoch_profile = f"[Epoch {self.epoch_count}]."
 
-        loss = patch_result['loss']
-        patch_acc = patch_result['patch_acc']
-        patch_auc = patch_result['patch_auc']
-        patch_conf = patch_result['patch_conf']
-        patch_conf_norm = patch_result['patch_conf_norm']
+        loss = DefaultStats._invalid_value_to_nan(patch_result['loss'])
+        patch_acc = DefaultStats._invalid_value_to_nan(patch_result['patch_acc'])
+        patch_auc = DefaultStats._invalid_value_to_nan(patch_result['patch_auc'])
+        patch_conf = DefaultStats._invalid_value_to_nan(patch_result['patch_conf'])
+        patch_conf_norm = DefaultStats._invalid_value_to_nan(patch_result['patch_conf_norm'])
         basic_verbose = f"{phase} -{epoch_profile}" \
             f"Loss:= {loss:.5f}{marker} " \
             f"Patch accuracy:= {patch_acc:.2f}  " \
