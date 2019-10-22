@@ -198,7 +198,7 @@ class MultiInstanceMeter(Meter):
         scores_all_category: List = [np.asarray(scores_per_roi).mean(axis=0)
                                      for scores_per_roi in scores_all_category_roi_collection]
         # class name
-  
+
         self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
         score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
         # noinspection PyUnresolvedReferences

@@ -8,7 +8,7 @@ from pycodelib.common import require_not_none
 from pycodelib.dataset import DatasetItem
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.CRITICAL)
 
 # noinspection PyUnresolvedReferences
 default_collate: Callable = torch.utils.data.dataloader.default_collate

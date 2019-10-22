@@ -150,7 +150,7 @@ class VizLogContainer(object):
 
         """
         # values contains None:
-        if not all((None, None)):
+        if not all(values):
             return
         if self.is_visualize:
             key = (meter_name, phase)
@@ -570,6 +570,8 @@ class DefaultStats(AbstractModelStats):
         # tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
         if conf_norm is None:
             return
+        if np.isnan(conf_norm).any():
+            debug_logger.warning(f"has nan")
         class_accuracy_all = conf_norm.diagonal()
         for idx, class_acc in enumerate(class_accuracy_all):
             # todo class name
