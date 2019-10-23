@@ -487,6 +487,7 @@ class DefaultStats(AbstractModelStats):
         self._best_stats.update({
             'patch': patch_result,
             'patient': patient_result,
+            'score': self.membership
         })
         engine: AbstractEngine = DefaultStats._engine_from_state(state)  # state['network']
         pickle_full = engine.dump_file_name('best_stat', 'pickle')

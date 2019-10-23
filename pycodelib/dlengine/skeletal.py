@@ -342,6 +342,7 @@ class AbstractEngine(Callable, EngineHooks):
                               maxepoch=self._maxepoch,
                               optimizer=optimizer)
         else:
+
             self.engine.test(self, dl)
 
     def label_collator(self, labels):
