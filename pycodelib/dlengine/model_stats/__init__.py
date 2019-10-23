@@ -115,7 +115,7 @@ class VizLogContainer(object):
         do_create: bool = True if not control_by_flag else self.is_visualize
         if do_create:
             for phase in phases:
-                if phase is DefaultStats.PHASE_COMBINE:
+                if phase == DefaultStats.PHASE_COMBINE:
                     title = ''
                 else:
                     title = VizLogContainer.mode_to_phase_name(phase)
