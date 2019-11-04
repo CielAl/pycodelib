@@ -5,9 +5,13 @@ from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn as nn
+# noinspection PyPackageRequirements
 from torchnet.logger.visdomlogger import BaseVisdomLogger
+# noinspection PyPackageRequirements
 from torchnet.logger import VisdomPlotLogger  # ,VisdomLogger
+# noinspection PyPackageRequirements
 from torchnet.meter import AverageValueMeter, ClassErrorMeter, ConfusionMeter, AUCMeter
+# noinspection PyPackageRequirements
 from torchnet.meter.meter import Meter
 
 from pycodelib.common import require_not_none
@@ -201,6 +205,12 @@ class AbstractModelStats(BaseModelStats, ABC):
         # to the control flow of torchnet.engine
         self.__epoch_count: int = 0
 
+        self._num_classes: int = len(self.class_partition)
+
+    @property
+    def num_classes(self):
+        return self._num_classes
+
     @abstractmethod
     def _evaluation(self, state):
         ...
@@ -288,7 +298,7 @@ class DefaultStats(AbstractModelStats):
         self._best_stats = dict()
         # class_list=sub_class_list,
         # partition=self.class_partition)
-        self.num_classes: int = len(self.class_partition)
+
         self._membership: Dict[str, Union[torch.Tensor, np.ndarray]] = dict()
         self.meter_container.add_meter(DefaultStats.PATCH_ACC, ClassErrorMeter(accuracy=True))
         self.meter_container.add_meter(DefaultStats.PATCH_CONF, ConfusionMeter(self.num_classes, normalized=False))

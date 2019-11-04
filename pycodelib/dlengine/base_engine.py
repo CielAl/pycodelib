@@ -52,11 +52,14 @@ class BaseEngine(AbstractEngine):
         self.debugger.level = -1
         self.dummy = torch.tensor([0.]).requires_grad_(True)
 
+    def num_classes(self):
+        return self.model_stats.num_classes
+
     def label_collator(self, labels):
         return self.model_stats.label_collator(labels)
 
     @staticmethod
-    def __empty_batch(data_batch: Union[Sequence, DataItemUnpackByVal]):
+    def _empty_batch(data_batch: Union[Sequence, DataItemUnpackByVal]):
         if isinstance(data_batch, Sequence):
             return len(data_batch) == 0 or len(data_batch[1]) == 0
         return len(data_batch) == 0
@@ -72,7 +75,7 @@ class BaseEngine(AbstractEngine):
             prediction: the prediction of the output layer
         """
         # (img), label, mask, row, col, img_original, filenames, index, train_flag
-        if BaseEngine.__empty_batch(data_batch):
+        if BaseEngine._empty_batch(data_batch):
             return self.dummy, self.dummy
 
         img = data_batch[self.img_key]
