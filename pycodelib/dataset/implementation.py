@@ -1,3 +1,5 @@
+import os
+import glob
 import tables
 from abc import abstractmethod
 import numpy as np
@@ -10,13 +12,16 @@ from collections import OrderedDict
 import platform
 import sys
 from collections.abc import Mapping
+import re
+from PIL import Image
+
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.DEBUG)
 # from abc import ABC, abstractmethod
 
 
-def validate_compatability():
+def validate_compatibility():
     impl = platform.python_implementation()
     major = sys.version_info.major
     minor = sys.version_info.minor
@@ -25,7 +30,7 @@ def validate_compatability():
     assert cpython_36 or python37
 
 
-validate_compatability()
+validate_compatibility()
 
 
 class DatasetItem(Mapping):
@@ -301,6 +306,73 @@ class AdaptorSet(AbstractDataset):
         return output
 
 
+class FileFolder(AbstractDataset):
+    """
+    A plain folder/file.ext structure. Information encoded in the filename.
+    Not vectorized. The batchification is handled by DataLoaders.
+    """
+    KEY_FILENAMES: str = 'filename'
+    KEY_INDEX: str = 'index'
+    KEY_IMG: str = 'img'
+    KEY_LABEL: str = 'label'
+
+    def __init__(self,
+                 root: str,
+                 ext: str,
+                 class_list: Sequence[str],
+                 flatten_output: bool,
+                 truncate_size: float = np.inf):
+
+        attributes = np.asarray([FileFolder.KEY_IMG,
+                                 FileFolder.KEY_LABEL,
+                                 FileFolder.KEY_FILENAMES,
+                                 FileFolder.KEY_INDEX])
+        super().__init__(flatten_output, attributes, truncate_size=truncate_size)
+        self.__root = root
+        self.__file_list: Sequence[str] = glob.glob(os.path.join(root, f"*.{ext}"))
+        self.__class_list = class_list
+
+    @property
+    def class_list(self):
+        return self.__class_list
+
+    @property
+    def root(self):
+        return self.__root
+
+    @property
+    def file_list(self):
+        return self.__file_list
+
+    def length_helper(self):
+        return len(self.__file_list)
+
+    def label(self, f_name):
+        basename = os.path.basename(f_name)
+        if self.class_list is None:
+            class_id_list = [0]
+        else:
+            class_id_list = \
+                [idx for idx in range(len(self.class_list)) if
+                 re.search(self.class_list[idx], basename, re.IGNORECASE)
+                 ]
+
+        if len(class_id_list) != 1:
+            logger.warning(f"Class_ID matching warning. Len:{class_id_list}. Name:{basename}")
+        class_id = class_id_list[0]
+        return class_id
+
+    def get_item_helper(self, index) -> DatasetItem:
+        f_name: str = self.file_list[index]
+        pil_img = Image.open(f_name)
+        label = self.label(f_name)
+        data = (pil_img, label, f_name, index)
+        keys = (FileFolder.KEY_IMG, FileFolder.KEY_LABEL, FileFolder.KEY_FILENAMES, FileFolder.KEY_INDEX)
+        item = OrderedDict([(k, v) for k, v in zip(keys, data)])
+        item = DatasetItem.build(item)
+        return item
+
+
 class H5SetBasic(AbstractDataset):
     KEY_FILENAMES: str = 'filename'
     KEY_INDEX: str = 'index'
@@ -419,21 +491,24 @@ class H5SetBasic(AbstractDataset):
         return data_out_dict
 
 
-class H5SetTransform(H5SetBasic):
+class H5SetTransform(AbstractDataset):
     KEY_IMG_ORIGIN: str = 'img_origin'
     @property
     def img_transform(self):
         return self._img_transform
 
     def __init__(self, filename: str, types: Sequence[str] = None,
+                 flatten_output: bool = False,
                  img_transform: Callable = None,
-                 img_key: str = 'img'):
+                 img_key: str = 'img',):
         # nothing special here, just internalizing the constructor parameters
-        super().__init__(filename, types)
+        self._base_dataset = H5SetBasic(filename, types,)
+        self._types = self._base_dataset.types
         self.preserved_attributes = np.append(self._types,
                                               [H5SetTransform.KEY_IMG_ORIGIN,
                                                H5SetBasic.KEY_FILENAMES,
                                                H5SetBasic.KEY_INDEX])
+        super().__init__(flatten_output=flatten_output, preserved_attributes=self.preserved_attributes)
         self._img_transform = img_transform
         assert img_key in self._types
         self._img_key = img_key
@@ -442,7 +517,7 @@ class H5SetTransform(H5SetBasic):
         # opening should be done in __init__ but seems to be
         # an issue with multi-threading so doing here. need to do it every time, otherwise hdf5 crashes
         # img, label, filename, *rest = super().__getitem__(index)
-        data_dict: OrderedDict = super().__getitem__(index)
+        data_dict: OrderedDict = self._base_dataset.get_item_helper(index).data_dict
         img = data_dict[self._img_key]
         img_new = img
         # if row vector (dimension reduced or not)
@@ -457,6 +532,9 @@ class H5SetTransform(H5SetBasic):
         data_dict.move_to_end(H5SetBasic.KEY_INDEX)
         output = DatasetItem.build(data_dict)
         return output
+
+    def length_helper(self):
+        return self._base_dataset.length_helper()
 
 
 class MultiSet(TorchDataset):
