@@ -236,6 +236,7 @@ class MultiInstanceMeter(Meter):
         conf_mat = confusion_matrix(true_labels, conf_pred_label, range(self.num_classes))
         conf_mat_norm = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
         conf_mat_norm = np.nan_to_num(conf_mat_norm)
+        assert len(np.unique(true_labels)) > 1
         if not self.binarize:
             roc_auc_dict = multi_class_roc_auc_vs_all(true_labels, scores_all_class, self._positive_class)
         else:

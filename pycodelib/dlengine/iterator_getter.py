@@ -1,4 +1,4 @@
-from typing import Dict, Callable, Sequence
+from typing import Dict, Callable, Sequence, Union
 from torch.utils.data import DataLoader
 from pycodelib.dataset import H5SetBasic, AbstractDataset
 from pycodelib.dlengine.skeletal import IteratorBuilderDictSet
@@ -14,7 +14,7 @@ logger.setLevel(level=logging.DEBUG)
 # batch=[(data[0][idx], data[1][idx], data[2][idx]) for idx in range(data[0].shape[0])]
 
 
-class H5DataGetter(IteratorBuilderDictSet):
+class BaseGetter(IteratorBuilderDictSet):
     """
         The DataLoader mapper (from mode). H5Dataset Based.
     """
@@ -96,52 +96,6 @@ class H5DataGetter(IteratorBuilderDictSet):
         assert len(set_group_level) == 1, f"Inconsistent group level. Got {set_group_level}"
         self.group_level = list(set_group_level)[0]
 
-    @classmethod
-    def build(cls, filename_dict: Dict[bool, str],
-              img_transform_dict: Dict[bool, Compose],
-              skip_class,
-              group_level: int = 0,
-              img_key: str = 'img',
-              label_key: str = 'label',
-              original_key: str = 'img_original',
-              type_order: np.ndarray = None,
-              flatten_output: bool = False
-              ):
-        """
-            Factory builder.
-        Args:
-            filename_dict: Dict in [mode, filename]
-            img_transform_dict: Dict of [mode, transformation]. None is allowed.
-            skip_class:
-            group_level:
-            img_key ():
-            label_key ():
-            original_key ():
-            type_order ():
-            flatten_output (bool): See AbstractDataset
-        Returns:
-            iter_getter (H5DataGetter):
-        """
-        # Make sure the input dicts has aligned keys.
-        assert filename_dict.keys() == img_transform_dict.keys(), 'Keys disagree.'
-        # Generate dataset map.
-        data_sets_dict: Dict[bool, H5SetBasic] = {
-                    x: H5SetBasic(filename_dict[x], group_level=group_level, flatten_output=flatten_output)
-                    for x in filename_dict.keys()
-        }
-        # instantiation
-        img_transform_dict = cls.collate_dict(img_transform_dict=img_transform_dict,
-                                              skip_class=skip_class,
-                                              group_level=group_level,
-                                              img_key=img_key,
-                                              label_key=label_key,
-                                              original_key=original_key,
-                                              type_order=type_order,
-                                              )
-
-        return cls(data_sets=data_sets_dict, trans_collate=img_transform_dict)
-        # {True: None, False: None}
-
     @property
     def transform(self) -> Dict[bool, BasicTransform]:
         """
@@ -183,3 +137,96 @@ class H5DataGetter(IteratorBuilderDictSet):
         return DataLoader(self.data_sets_collection[mode], num_workers=num_workers, pin_memory=pin_memory,
                           batch_size=batch_size, shuffle=shuffle, drop_last=drop_last,
                           collate_fn=self.transform[mode])
+
+    @classmethod
+    def build(cls, data_sets_dict: Dict,
+              img_transform_dict: Dict[bool, Union[Compose, None]],
+              skip_class,
+              group_level: int = 0,
+              img_key: str = 'img',
+              label_key: str = 'label',
+              original_key: str = 'img_original',
+              type_order: np.ndarray = None,
+              ):
+        """
+            Factory builder.
+        Args:
+            data_sets_dict: Dict in [mode, dataset]
+            img_transform_dict: Dict of [mode, transformation]. None is allowed.
+            skip_class:
+            group_level:
+            img_key ():
+            label_key ():
+            original_key ():
+            type_order ():
+        Returns:
+            iter_getter (H5DataGetter):
+        """
+        # Make sure the input dicts has aligned keys.
+        # instantiation
+        img_transform_dict = cls.collate_dict(img_transform_dict=img_transform_dict,
+                                              skip_class=skip_class,
+                                              group_level=group_level,
+                                              img_key=img_key,
+                                              label_key=label_key,
+                                              original_key=original_key,
+                                              type_order=type_order,
+                                              )
+
+        return cls(data_sets=data_sets_dict, trans_collate=img_transform_dict)
+
+
+class H5DataGetter(BaseGetter):
+
+    @classmethod
+    def build(cls, filename_dict: Dict[bool, str],
+              img_transform_dict: Dict[bool, Union[Compose, None]],
+              skip_class,
+              group_level: int = 0,
+              img_key: str = 'img',
+              label_key: str = 'label',
+              original_key: str = 'img_original',
+              type_order: np.ndarray = None,
+              flatten_output: bool = False
+              ):
+        """
+            Factory builder.
+        Args:
+            filename_dict: Dict in [mode, filename]
+            img_transform_dict: Dict of [mode, transformation]. None is allowed.
+            skip_class:
+            group_level:
+            img_key ():
+            label_key ():
+            original_key ():
+            type_order ():
+            flatten_output (bool): See AbstractDataset
+        Returns:
+            iter_getter (H5DataGetter):
+        """
+        # Make sure the input dicts has aligned keys.
+        assert filename_dict.keys() == img_transform_dict.keys(), 'Keys disagree.'
+        # Generate dataset map.
+        data_sets_dict: Dict[bool, H5SetBasic] = {
+                    x: H5SetBasic(filename_dict[x], group_level=group_level, flatten_output=flatten_output)
+                    for x in filename_dict.keys()
+        }
+        # instantiation
+        img_transform_dict = cls.collate_dict(img_transform_dict=img_transform_dict,
+                                              skip_class=skip_class,
+                                              group_level=group_level,
+                                              img_key=img_key,
+                                              label_key=label_key,
+                                              original_key=original_key,
+                                              type_order=type_order,
+                                              )
+
+        return BaseGetter.build(data_sets_dict, img_transform_dict,
+                                skip_class=skip_class,
+                                group_level=group_level,
+                                img_key=img_key,
+                                label_key=label_key,
+                                original_key=original_key,
+                                type_order=type_order)
+        # return cls(data_sets=data_sets_dict, trans_collate=img_transform_dict)
+        # {True: None, False: None}

@@ -5,6 +5,7 @@ from abc import abstractmethod
 import numpy as np
 import torch
 from torch.utils.data import Dataset as TorchDataset
+from torchvision.datasets.folder import make_dataset
 from typing import Sequence, Callable, List, Dict, Union, Iterable
 from pycodelib import common
 from openslide import OpenSlide
@@ -14,6 +15,7 @@ import sys
 from collections.abc import Mapping
 import re
 from PIL import Image
+from lazy_property import LazyProperty
 
 import logging
 logger = logging.getLogger(__name__)
@@ -182,6 +184,15 @@ class DataItemUnpackByVal(object):
 
 
 class AbstractDataset(TorchDataset):
+
+    @staticmethod
+    def slice2array(index: slice, length: int):
+        start, stop, step = index.start, index.stop, index.step
+        step = common.default_not_none(step, 1)
+        start = common.default_not_none(start, 0)
+        stop = common.default_not_none(stop, length)
+        assert step != 0, 'step is 0'
+        return np.arange(start, stop, step)
 
     @property
     def flatten_output(self) -> bool:
@@ -376,14 +387,6 @@ class FileFolder(AbstractDataset):
 class H5SetBasic(AbstractDataset):
     KEY_FILENAMES: str = 'filename'
     KEY_INDEX: str = 'index'
-    @staticmethod
-    def slice2array(index: slice, length: int):
-        start, stop, step = index.start, index.stop, index.step
-        step = common.default_not_none(step, 1)
-        start = common.default_not_none(start, 0)
-        stop = common.default_not_none(stop, length)
-        assert step != 0, 'step is 0'
-        return np.arange(start, stop, step)
 
     @property
     def filename(self):
@@ -624,3 +627,93 @@ class SlideSet(TorchDataset):
                                          self.level,
                                          by_row=not self.by_row)
         return step_num * step_num_dual
+
+
+class ClassSpecifiedFolder(AbstractDataset):
+    """
+    By Default, transforms to Pillow
+    """
+    KEY_IMG: str = 'img'
+    KEY_LABEL: str = 'label'
+    KEY_FILENAME: str = 'filename'
+    KEY_INDEX: str = 'index'
+    KEY_IMG_ORIGIN: str = 'img_origin'
+
+    def __init__(self,
+                 directory,
+                 class_to_idx,
+                 is_valid_file=None,
+                 transforms: Callable = None,
+                 flatten_output: bool = False,
+                 truncate_size: float = np.inf,
+                 roi_name_parser: Callable = None):
+        from torchvision.datasets.folder import IMG_EXTENSIONS
+        preserved_attributes = np.asarray([ClassSpecifiedFolder.KEY_IMG,
+                                           ClassSpecifiedFolder.KEY_LABEL,
+                                           ClassSpecifiedFolder.KEY_IMG_ORIGIN,
+                                           ClassSpecifiedFolder.KEY_FILENAME,
+                                           ClassSpecifiedFolder.KEY_INDEX])
+        super().__init__(flatten_output=flatten_output, preserved_attributes=preserved_attributes,
+                         truncate_size=truncate_size)
+
+        extensions = IMG_EXTENSIONS if is_valid_file is None else None
+        self.__class_to_idx = class_to_idx
+        self.__samples = make_dataset(directory, class_to_idx, extensions, is_valid_file)
+        self.roi_name_parser = roi_name_parser\
+            if roi_name_parser is not None else\
+            ClassSpecifiedFolder._default_roi_name_parser
+        self.__transforms = transforms
+
+    @property
+    def transforms(self):
+        return self.__transforms
+
+    @transforms.setter
+    def transforms(self, x):
+        assert x is None or isinstance(x, Callable)
+        self.__transforms = x
+
+    @property
+    def samples(self):
+        return self.__samples
+
+    def length_helper(self):
+        return len(self.samples)
+
+    @staticmethod
+    def _default_roi_name_parser(img_filename, *args, **kwargs):
+        delimiter = '_'
+        basename = os.path.basename(img_filename)
+        file_text, ext = os.path.splitext(basename)
+        roi_components = file_text.split('_')[:-2]
+        roi_file_text = delimiter.join(roi_components)
+        roi_filename = f"{roi_file_text}{ext}"
+        return roi_filename
+
+    def get_item_helper(self, index) -> Union[OrderedDict, DatasetItem]:
+        sample = self.samples[index]
+        img_filename, class_id = sample
+        roi_filename = self.roi_name_parser(img_filename)
+        o_dict = OrderedDict()
+
+        img_pil = Image.open(img_filename)
+        # origin is not affected by transformation, so it must be tensor or ndarray
+        img_pil_origin = np.asarray(img_pil)
+
+        if self.transforms is not None:
+            img_pil = self.transforms(img_pil)
+
+        o_dict[ClassSpecifiedFolder.KEY_IMG] = img_pil
+        o_dict[ClassSpecifiedFolder.KEY_LABEL] = class_id
+        o_dict[ClassSpecifiedFolder.KEY_IMG_ORIGIN] = img_pil_origin
+        o_dict[ClassSpecifiedFolder.KEY_FILENAME] = roi_filename
+        o_dict[ClassSpecifiedFolder.KEY_INDEX] = index
+        item = DatasetItem(o_dict)
+        return item
+
+    @LazyProperty
+    def class_sizes(self):
+        class_list = np.asarray([x[1] for x in self.samples])
+        class_id_unique_sorted, count = np.unique(class_list, return_counts=True)
+        assert len(set(self.__class_to_idx.values()) - set(class_id_unique_sorted)) == 0
+        return count
