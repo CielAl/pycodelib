@@ -270,6 +270,10 @@ class DefaultStats(AbstractModelStats):
     VIZ_MULTI_TRUE_PRED: str = 'Patient_TRUE_PRED'
     VIZ_MULTI_AUC: str = 'Patient_AUC'
 
+    @staticmethod
+    def class_per_phase(x, y):
+        return f"{x}_{y}"
+
     def __init__(self,
                  sub_class_list: Sequence,
                  class_partition: Sequence[Union[int, Sequence[int]]],
@@ -308,7 +312,9 @@ class DefaultStats(AbstractModelStats):
         phase_name_list = [VizLogContainer.mode_to_phase_name(phase) for phase in [True, False]]
         plot_opts_by_phase = {'legend': phase_name_list}
 
-        plot_opts_by_class_name = {'legend': self.sub_class_list}
+        class_name_cross_phase = [DefaultStats.class_per_phase(x, y)
+                                  for x in self.sub_class_list for y in phase_name_list]
+        plot_opts_by_class_name = {'legend': class_name_cross_phase}
         if self.patient_pred is not None and self.patient_info is not None:
             self.meter_container.add_meter(DefaultStats.MULTI_INSTANCE,
                                            MultiInstanceMeter(self.patient_info,
@@ -577,8 +583,10 @@ class DefaultStats(AbstractModelStats):
             print(conf_mat)
             print(conf_mat_norm)
 
-    def __viz_accuracy(self, logger_name, phase, conf_norm: np.ndarray):
+    def __viz_accuracy(self, logger_name, current_phase_name, conf_norm: np.ndarray):
         # tn_patch, fp_patch, fn_patch, tp_patch = patch_conf_norm.ravel()
+        # current_phase_name is to tag what exactly phase is of the value that is passed in.
+        # Since all phases are plot in the same logger, the "phase" in visualize_log is still "PHASE_COMBINE"
         if conf_norm is None:
             return
         if np.isnan(conf_norm).any():
@@ -586,11 +594,12 @@ class DefaultStats(AbstractModelStats):
         class_accuracy_all = conf_norm.diagonal()
         for idx, class_acc in enumerate(class_accuracy_all):
             # todo class name
-            plot_name = self.sub_class_list[idx]
+            class_name = self.sub_class_list[idx]
             # opts = {'legend': plot_name}
+            plot_name = DefaultStats.class_per_phase(class_name, current_phase_name)
             self.vizlog_container.\
                 visualize_log(logger_name,
-                              phase,
+                              DefaultStats.PHASE_COMBINE,
                               self.epoch_count, class_acc,
                               name=plot_name,
                               )
@@ -609,7 +618,7 @@ class DefaultStats(AbstractModelStats):
 
         """
         # if train - assert the epoch count.
-
+        # either test, or epoch num agree
         assert not state['train'] or state['epoch'] == self.epoch_count
 
         phase = self.validation_phase_name(state)
@@ -625,12 +634,12 @@ class DefaultStats(AbstractModelStats):
         # loss/acc/auc/conf
         self.__basic_verbose_helper_patch(phase, patch_result, is_best_loss)
         self.__basic_verbose_helper_patient(phase, patient_result=patient_result)
-        self.__viz_accuracy(DefaultStats.VIZ_PATCH_TRUE_PRED, DefaultStats.PHASE_COMBINE,
-                            patch_result.get('patch_conf_norm'))
 
+        phase_name = VizLogContainer.mode_to_phase_name(state['train'])
+        self.__viz_accuracy(DefaultStats.VIZ_PATCH_TRUE_PRED, phase_name,
+                            patch_result.get('patch_conf_norm'))
         loss = patch_result['loss']
         # merge train/val into the same plot
-        phase_name = VizLogContainer.mode_to_phase_name(state['train'])
         self.vizlog_container.visualize_log(DefaultStats.VIZ_LOSS, DefaultStats.PHASE_COMBINE, self.epoch_count, loss,
                                             name=phase_name)
 
@@ -640,16 +649,27 @@ class DefaultStats(AbstractModelStats):
                                             DefaultStats.PHASE_COMBINE, self.epoch_count, patch_auc,
                                             name=phase_name
                                             )
-
         self.__patient_viz_helper(patient_result, phase_name)
         # moved to on_start
 
     def __patient_viz_helper(self, patient_result, phase_name):
         if patient_result is None:
             return
-        self.__viz_accuracy(DefaultStats.VIZ_MULTI_TRUE_PRED, DefaultStats.PHASE_COMBINE,
+        self.__viz_accuracy(DefaultStats.VIZ_MULTI_TRUE_PRED, phase_name,
                             patient_result.get('conf_mat_norm'))
-        patient_auc = -1 if patient_result is None else patient_result.get('auc', -1)
+
+        # patient_auc = -2 if patient_result is None else patient_result.get('roc_auc_dict', -1)
+        roc_auc_dict = patient_result.get('roc_auc_dict')
+        if roc_auc_dict is not None:
+            # for now only print the first class
+            result_list = list(patient_result['roc_auc_dict'].values())
+            if len(result_list) == 0:
+                patient_auc = -1
+            else:
+                patient_auc = result_list[0].get('auc', -2)
+        else:
+            patient_auc = -3
+
         self.vizlog_container.visualize_log(DefaultStats.VIZ_MULTI_AUC, DefaultStats.PHASE_COMBINE,
                                             self.epoch_count,
                                             patient_auc,
