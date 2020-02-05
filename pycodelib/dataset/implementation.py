@@ -16,6 +16,7 @@ from collections.abc import Mapping
 import re
 from PIL import Image
 from lazy_property import LazyProperty
+from torchvision.datasets.folder import IMG_EXTENSIONS, default_loader
 
 import logging
 logger = logging.getLogger(__name__)
@@ -646,8 +647,11 @@ class ClassSpecifiedFolder(AbstractDataset):
                  transforms: Callable = None,
                  flatten_output: bool = False,
                  truncate_size: float = np.inf,
-                 roi_name_parser: Callable = None):
-        from torchvision.datasets.folder import IMG_EXTENSIONS
+                 roi_name_parser: Callable = None,
+                 loader: Callable = default_loader,
+                 file_extension=IMG_EXTENSIONS,
+                 ):
+
         preserved_attributes = np.asarray([ClassSpecifiedFolder.KEY_IMG,
                                            ClassSpecifiedFolder.KEY_LABEL,
                                            ClassSpecifiedFolder.KEY_IMG_ORIGIN,
@@ -656,13 +660,14 @@ class ClassSpecifiedFolder(AbstractDataset):
         super().__init__(flatten_output=flatten_output, preserved_attributes=preserved_attributes,
                          truncate_size=truncate_size)
 
-        extensions = IMG_EXTENSIONS if is_valid_file is None else None
+        extensions = file_extension if is_valid_file is None else None
         self.__class_to_idx = class_to_idx
         self.__samples = make_dataset(directory, class_to_idx, extensions, is_valid_file)
         self.roi_name_parser = roi_name_parser\
             if roi_name_parser is not None else\
             ClassSpecifiedFolder._default_roi_name_parser
         self.__transforms = transforms
+        self._loader = loader
 
     @property
     def transforms(self):
@@ -696,7 +701,7 @@ class ClassSpecifiedFolder(AbstractDataset):
         roi_filename = self.roi_name_parser(img_filename)
         o_dict = OrderedDict()
 
-        img_pil = Image.open(img_filename)
+        img_pil = self._loader(img_filename)
         # origin is not affected by transformation, so it must be tensor or ndarray
         img_pil_origin = np.asarray(img_pil)
 
