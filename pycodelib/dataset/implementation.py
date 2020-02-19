@@ -186,6 +186,14 @@ class DataItemUnpackByVal(object):
 
 class AbstractDataset(TorchDataset):
 
+    def collate_not_required_fields(self, o_dict: OrderedDict):
+        o_dict_new_ref_mutate = o_dict.copy()
+        for k, v in o_dict.items():
+            if k not in self.preserved_attributes:
+                o_dict_new_ref_mutate.pop(k)
+        # in-place, but offers the return
+        return o_dict_new_ref_mutate
+
     @staticmethod
     def slice2array(index: slice, length: int):
         start, stop, step = index.start, index.stop, index.step
@@ -722,3 +730,4 @@ class ClassSpecifiedFolder(AbstractDataset):
         class_id_unique_sorted, count = np.unique(class_list, return_counts=True)
         assert len(set(self.__class_to_idx.values()) - set(class_id_unique_sorted)) == 0
         return count
+
