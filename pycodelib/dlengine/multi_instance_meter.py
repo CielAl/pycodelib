@@ -181,7 +181,7 @@ class MultiInstanceMeter(Meter):
                                                                                 high_priority_col=high_priority_col)
         return true_labels_occurrence
 
-    def value_helper(self):
+    def value_helper(self, score_thresh=0):
         """
             todo Move the fetch_prediction here.
         Returns:
@@ -202,7 +202,6 @@ class MultiInstanceMeter(Meter):
         self.patient_pred.load_score(scores_all_category, filenames, flush=True, expand=True)
         score_table = self.patient_pred.get_df(CascadedPred.NAME_SCORE)
         # noinspection PyUnresolvedReferences
-        # breakpoint()
         scores_all_class: np.ndarray = score_table.values.copy()
         # add None (extra dim) in dims for broadcasting (divide a column),
         # otherwise the [:, -1] returns a row vector and performs division on rows.
@@ -222,8 +221,9 @@ class MultiInstanceMeter(Meter):
         patch_counts = score_table.values[:, -1].copy()
         return scores_all_class, true_labels, patch_counts, rows_index, columns_keys
 
-    def value(self):
-        scores_all_class, true_labels, patch_counts, rows_index, columns_keys = self.value_helper()
+    def value(self, score_thresh=0):
+        scores_all_class, true_labels, patch_counts, rows_index, columns_keys = \
+            self.value_helper(score_thresh=score_thresh)
         raw_data = {
             "rows_index": rows_index,
             "columns_keys": columns_keys,
@@ -232,8 +232,10 @@ class MultiInstanceMeter(Meter):
             "true_labels": true_labels,
         }
         conf_pred_label = scores_all_class.argmax(axis=1)
-
-        conf_mat = confusion_matrix(true_labels, conf_pred_label, range(self.num_classes))
+        try:
+            conf_mat = confusion_matrix(true_labels, conf_pred_label, labels=range(self.num_classes))
+        except:
+            breakpoint()
         conf_mat_norm = conf_mat.astype('float') / conf_mat.sum(axis=1)[:, np.newaxis]
         conf_mat_norm = np.nan_to_num(conf_mat_norm)
         assert len(np.unique(true_labels)) > 1

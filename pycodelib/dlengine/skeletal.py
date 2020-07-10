@@ -22,6 +22,7 @@ class AbstractIteratorBuilder(ABC):
         The Encapsulation to assign the DataLoader given the phases/modes (i.e. train/val).
     """
     BATCH_SIZE: int = 32
+
     @classmethod
     @abstractmethod
     def get_iterator(cls, mode, shuffle, num_workers=4, drop_last=False,  pin_memory=True, batch_size=4,

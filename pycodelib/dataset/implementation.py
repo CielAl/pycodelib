@@ -4,8 +4,10 @@ import tables
 from abc import abstractmethod
 import numpy as np
 import torch
+import torchvision
+import imageio
 from torch.utils.data import Dataset as TorchDataset
-from torchvision.datasets.folder import make_dataset
+# from torchvision.datasets.folder import make_dataset
 from typing import Sequence, Callable, List, Dict, Union, Iterable
 from pycodelib import common
 from openslide import OpenSlide
@@ -20,8 +22,10 @@ from torchvision.datasets.folder import IMG_EXTENSIONS, default_loader
 
 import logging
 logger = logging.getLogger(__name__)
-logger.setLevel(level=logging.DEBUG)
+logger.setLevel(level=logging.CRITICAL)
 # from abc import ABC, abstractmethod
+
+make_dataset = torchvision.datasets.folder.make_dataset
 
 
 def validate_compatibility():
@@ -505,6 +509,7 @@ class H5SetBasic(AbstractDataset):
 
 class H5SetTransform(AbstractDataset):
     KEY_IMG_ORIGIN: str = 'img_origin'
+
     @property
     def img_transform(self):
         return self._img_transform
@@ -596,46 +601,84 @@ class MemSet(TorchDataset):
 
 
 class SlideSet(TorchDataset):
-    def __init__(self, file_name, patch_size, level=0, by_row=True):
+    """
+    Floor if not divisible
+    """
+    def __init__(self, file_name, patch_size, level=0, by_row=True, img_transform=None):
         self.file_name = file_name
         self.patch_size = patch_size
         self.level = level
         self.by_row = by_row
+        self.img_transform = img_transform
 
     @staticmethod
     def segment(osh, patch_size, level=0, by_row=True):
+        """
+        Use flooring instead of ceil -- cut off the remaining if smaller than patch_size
+        consistent to fold and stride trick
+        Args:
+            osh:
+            patch_size:
+            level:
+            by_row:
+
+        Returns:
+
+        """
         width, height = osh.level_dimensions[level]
         if by_row:
             length = width
         else:
             length = height
-        step_num = np.ceil(length / patch_size).astype(np.int)
+        step_num = length // patch_size  # np.ceil(length / patch_size).astype(np.int)
         return step_num
 
     @staticmethod
     def idx2loc(osh, index, patch_size, level=0, by_row=True):
         row_step_num = SlideSet.segment(osh, patch_size, level=level, by_row=by_row)
+        assert row_step_num > 0, f" too small compared to patch_size"
         vert = index // row_step_num * patch_size
         horiz = index % row_step_num * patch_size
         return horiz, vert
 
+    @property
+    def osh(self):
+        return OpenSlide(self.file_name)
+
+    def thumbnail(self, level):
+        osh = self.osh
+        thumb = osh.get_thumbnail(osh.level_dimensions[level])
+        return np.asarray(thumb)
+
     def __getitem__(self, index):
-        osh = OpenSlide(self.file_name)
+        osh = self.osh
         c, r = SlideSet.idx2loc(osh, index, self.patch_size, level=self.level, by_row=self.by_row)
         pil_region = osh.read_region(location=(c, r), level=self.level, size=(self.patch_size, self.patch_size))
-        return np.array(pil_region)
+        # read_region returns RGBA
+        pil_region = pil_region.convert('RGB')
+        if self.img_transform is not None:
+            pil_region = self.img_transform(pil_region)
+        return pil_region
+
+    def len_width(self):
+        width, _ = self.osh.level_dimensions[self.level]
+        return width // self.patch_size
+
+    def len_height(self):
+        _, height = self.osh.level_dimensions[self.level]
+        return height // self.patch_size
+
+    @property
+    def patch_map_shape(self):
+        """
+        H, W of patch map (non-overlapping)
+        Returns:
+
+        """
+        return self.len_height(), self.len_width()
 
     def __len__(self):
-        osh = OpenSlide(self.file_name)
-        step_num = SlideSet.segment(osh,
-                                    self.patch_size,
-                                    self.level,
-                                    by_row=self.by_row)
-        step_num_dual = SlideSet.segment(osh,
-                                         self.patch_size,
-                                         self.level,
-                                         by_row=not self.by_row)
-        return step_num * step_num_dual
+        return self.len_width() * self.len_height()
 
 
 class ClassSpecifiedFolder(AbstractDataset):
@@ -693,6 +736,7 @@ class ClassSpecifiedFolder(AbstractDataset):
     def length_helper(self):
         return len(self.samples)
 
+    # noinspection PyUnusedLocal
     @staticmethod
     def _default_roi_name_parser(img_filename, *args, **kwargs):
         delimiter = '_'
@@ -731,3 +775,6 @@ class ClassSpecifiedFolder(AbstractDataset):
         assert len(set(self.__class_to_idx.values()) - set(class_id_unique_sorted)) == 0
         return count
 
+    @staticmethod
+    def imageio_loader(fname):
+        return imageio.imread(fname)

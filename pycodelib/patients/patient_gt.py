@@ -15,7 +15,16 @@ class SheetCollection(PatientSlideCollection):
     _DEFAULT_CLASS = ['No Path', 'BCC', 'Situ', 'Invasive']
     SLIDE_SEPARATOR: str = '_'
 
-    def __init__(self, file_list, sheet_name: str, class_list: Sequence[str] = None):
+    def __init__(self, file_list, sheet_name: str, class_list: Sequence[str] = None,
+                 multi_parse_return_id: int = None):
+        """
+
+        Args:
+            file_list:
+            sheet_name:
+            class_list:
+            multi_parse_return_id: If multiple class str in name - which one to pick?
+        """
         super().__init__()
         if class_list is None:
             class_list = type(self)._DEFAULT_CLASS
@@ -23,6 +32,9 @@ class SheetCollection(PatientSlideCollection):
         self._patient2slides_dict: Dict[str, Set[str, ...]] = dict()
         self.patient_sheet = None
         self._file_list = file_list
+        self._multi_parse_return_id = multi_parse_return_id
+
+        # this must be called after all fields being defined
         self.load_ground_truth(sheet_name, class_list)
 
     def patient2slides(self, patient_id):
@@ -36,8 +48,11 @@ class SheetCollection(PatientSlideCollection):
         parsed = [class_name for class_name in self.class_list
                   if re.search(class_name, roi_class, re.IGNORECASE) is not None]
         logging.debug(f"{roi_class}.{self.class_list}|||{parsed}")
-        assert len(parsed) == 1, f"ambiguity in class-parsing:{roi_class}"
-        return parsed[0]
+
+        assert len(parsed) == 1 or self._multi_parse_return_id is not None, f"ambiguity in class-parsing:{roi_class}"
+        return_ind = 0 if len(parsed) == 1 else self._multi_parse_return_id
+
+        return parsed[return_ind]
 
     def slide_name(self, file: str) -> Tuple[str, str]:
         return type(self).slide_name_static(self, file)

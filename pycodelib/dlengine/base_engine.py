@@ -123,7 +123,8 @@ class BaseEngine(AbstractEngine):
 
     def on_sample(self, state: Dict[str, Any], **kwargs):
         """
-
+        Mark whether the sample is valid (by length). If empty,
+        flag state['valid_sample'] as False.
         Args:
             state:
 
@@ -143,7 +144,7 @@ class BaseEngine(AbstractEngine):
 
     def on_update(self, state: Dict[str, Any], **kwargs):
         """
-            Pass
+            Only update the model stats on valid samples (non-empty)
         Args:
             state:
 
@@ -176,10 +177,10 @@ class BaseEngine(AbstractEngine):
             'opt_state_dict': self._optimizer.state_dict()
         }
         chk_full = self.dump_file_name(f"model_{state['epoch']}", 'pth')
-        torch.save(checkpoint, chk_full)
+        # torch.save(checkpoint, chk_full)
 
         model_full = self.dump_file_name(f"model_obj_{state['epoch']}", 'pth')
-        torch.save(self.model, model_full)
+        # torch.save(self.model, model_full)
 
         stats_file = self.dump_file_name(f"latent_{state['epoch']}", "pickle")
         with open(stats_file, 'wb') as handle:

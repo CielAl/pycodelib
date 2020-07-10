@@ -19,6 +19,7 @@ from pycodelib.dlengine.skeletal import AbstractEngine
 from pycodelib.metrics import label_binarize_group, label_encode_by_partition
 from pycodelib.patients import CascadedPred, SheetCollection
 from ..multi_instance_meter import MultiInstanceMeter
+from ..multi_class_auc import MultiAUC
 from ..skeletal import EngineHooks
 import logging
 debug_logger = logging.getLogger(__name__)
@@ -307,7 +308,7 @@ class DefaultStats(AbstractModelStats):
         self.meter_container.add_meter(DefaultStats.PATCH_ACC, ClassErrorMeter(accuracy=True))
         self.meter_container.add_meter(DefaultStats.PATCH_CONF, ConfusionMeter(self.num_classes, normalized=False))
         self.meter_container.add_meter(DefaultStats.LOSS_METER, AverageValueMeter())
-        self.meter_container.add_meter(DefaultStats.PATCH_AUC, AUCMeter())
+        self.meter_container.add_meter(DefaultStats.PATCH_AUC, MultiAUC(num_class=self.num_classes))
 
         phase_name_list = [VizLogContainer.mode_to_phase_name(phase) for phase in [True, False]]
         plot_opts_by_phase = {'legend': phase_name_list}
@@ -335,7 +336,7 @@ class DefaultStats(AbstractModelStats):
                                          [DefaultStats.PHASE_COMBINE],
                                          opts=plot_opts_by_class_name)
         self.vizlog_container.add_logger(VisdomPlotLogger, 'line', DefaultStats.VIZ_PATCH_AUC,
-                                         [DefaultStats.PHASE_COMBINE], opts=plot_opts_by_phase)
+                                         [DefaultStats.PHASE_COMBINE], opts=plot_opts_by_class_name)
 
     def update_membership(self, scores, index):
         # debug the memory leak
@@ -483,6 +484,8 @@ class DefaultStats(AbstractModelStats):
             score_numpy = np.atleast_1d(pred_softmax[:, 1])
             label_numpy = np.atleast_1d(label.cpu().squeeze().numpy())
             self.meter_container.meter_add_value(DefaultStats.PATCH_AUC, score_numpy, label_numpy)
+        else:
+            self.meter_container.meter_add_value(DefaultStats.PATCH_AUC, pred_softmax, label)
 
     def on_start(self, state: Dict[str, Any], *args, **kwargs):
         self.meter_container.reset_meters()
@@ -525,8 +528,7 @@ class DefaultStats(AbstractModelStats):
     def __patch_level_helper(self):
         loss = self.meter_container.meter_get_value(DefaultStats.LOSS_METER, raise_flag=True)[0]
         patch_acc = self.meter_container.meter_get_value(DefaultStats.PATCH_ACC, raise_flag=True)[0]
-        patch_auc = self.meter_container.meter_get_value(DefaultStats.PATCH_AUC, raise_flag=True)[0] \
-            if self.num_classes == 2 else None
+        patch_auc = self.meter_container.meter_get_value(DefaultStats.PATCH_AUC, raise_flag=True)[0]
         patch_conf = self.meter_container.meter_get_value(DefaultStats.PATCH_CONF, raise_flag=True)
         patch_conf_norm: np.ndarray = patch_conf.astype('float') / patch_conf.sum(axis=1)[:, np.newaxis]
         result_dict: Dict[str, Any] = {
@@ -556,10 +558,12 @@ class DefaultStats(AbstractModelStats):
         patch_auc = DefaultStats._invalid_value_to_nan(patch_result['patch_auc'])
         patch_conf = DefaultStats._invalid_value_to_nan(patch_result['patch_conf'])
         patch_conf_norm = DefaultStats._invalid_value_to_nan(patch_result['patch_conf_norm'])
+        patch_auc_print = np.array_str(np.asarray(patch_auc), precision=2, suppress_small=True)
         basic_verbose = f"{phase} -{epoch_profile}" \
             f"Loss:= {loss:.5f}{marker} " \
             f"Patch accuracy:= {patch_acc:.2f}  " \
-            f"Patch AUC:= {patch_auc:.2f}"
+            f"Patch AUC:= {patch_auc_print}"
+
         if verbose_flag:
             print(basic_verbose)
             print(patch_conf)
@@ -645,10 +649,10 @@ class DefaultStats(AbstractModelStats):
 
         patch_auc = patch_result['patch_auc']
         # merge
-        self.vizlog_container.visualize_log(DefaultStats.VIZ_PATCH_AUC,
-                                            DefaultStats.PHASE_COMBINE, self.epoch_count, patch_auc,
-                                            name=phase_name
-                                            )
+        # self.vizlog_container.visualize_log(DefaultStats.VIZ_PATCH_AUC,
+        #                                    DefaultStats.PHASE_COMBINE, self.epoch_count, patch_auc,
+        #                                    name=phase_name
+        #                                    )
         self.__patient_viz_helper(patient_result, phase_name)
         # moved to on_start
 

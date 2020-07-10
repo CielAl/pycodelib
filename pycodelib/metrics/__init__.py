@@ -5,7 +5,7 @@ from typing import Dict, Union, Sequence, Iterable
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score, roc_curve
-from sklearn.metrics.ranking import label_binarize
+from sklearn.preprocessing import label_binarize
 
 
 # todo wrap the class-mapping from multi_class_roc_auc
