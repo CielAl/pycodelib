@@ -600,16 +600,34 @@ class MemSet(TorchDataset):
         return img
 
 
-class SlideSet(TorchDataset):
+class SlideSet(AbstractDataset):
     """
     Floor if not divisible
     """
+    DEFAULT_IMG_KEY: str = 'img'
+    DEFAULT_COORD_KEY: str = 'coord'
+    DEFAULT_INDEX_KEY: str = 'index'
 
-    def __init__(self, file_name, patch_size,
-                 level=0,
+    def __init__(self,
+                 file_name: str,
+                 patch_size: int,
+                 level: int = 0,
                  stride: int = None,
-                 by_row=True,
-                 img_transform=None):
+                 by_row: bool = True,
+                 img_transform: Callable = None,
+                 flatten_output: bool = False,
+                 truncate_size: float = np.inf):
+
+        img_key: str = SlideSet.DEFAULT_IMG_KEY
+        coord_key: str = SlideSet.DEFAULT_COORD_KEY
+        index_key: str = SlideSet.DEFAULT_INDEX_KEY
+
+        preserved_attributes = np.asarray([img_key,
+                                           coord_key,
+                                           index_key])
+        super().__init__(flatten_output=flatten_output,
+                         preserved_attributes=preserved_attributes,
+                         truncate_size=truncate_size)
         self.file_name = file_name
         self.patch_size = patch_size
         self.level = level
@@ -641,7 +659,7 @@ class SlideSet(TorchDataset):
         """
         return self.len_height(), self.len_width()
 
-    def __len__(self):
+    def length_helper(self):
         return self.len_width() * self.len_height()
 
     @staticmethod
@@ -697,7 +715,7 @@ class SlideSet(TorchDataset):
         thumb = osh.get_thumbnail(osh.level_dimensions[level])
         return np.asarray(thumb)
 
-    def __getitem__(self, index):
+    def pil_img_from_index(self, index):
         osh = self.osh
         chunk_step_num = SlideSet.segment(osh, self.patch_size,
                                           stride=self.stride,
@@ -711,9 +729,21 @@ class SlideSet(TorchDataset):
         pil_region = osh.read_region(location=(c, r), level=self.level, size=(self.patch_size, self.patch_size))
         # read_region returns RGBA
         pil_region = pil_region.convert('RGB')
+        return pil_region, (c, r)
+
+    def get_item_helper(self, index):
+        o_dict = OrderedDict()
+
+        img, coordinate_rc = self.pil_img_from_index(index)
+
         if self.img_transform is not None:
-            pil_region = self.img_transform(pil_region)
-        return pil_region
+            img = self.img_transform(img)
+
+        o_dict[SlideSet.DEFAULT_IMG_KEY] = img
+        o_dict[SlideSet.DEFAULT_COORD_KEY] = coordinate_rc
+        o_dict[SlideSet.DEFAULT_INDEX_KEY] = index
+        item = DatasetItem(o_dict)
+        return item
 
 
 class ClassSpecifiedFolder(AbstractDataset):
