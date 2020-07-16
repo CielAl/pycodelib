@@ -8,7 +8,7 @@ import torchvision
 import imageio
 from torch.utils.data import Dataset as TorchDataset
 # from torchvision.datasets.folder import make_dataset
-from typing import Sequence, Callable, List, Dict, Union, Iterable
+from typing import Sequence, Callable, List, Dict, Union, Iterable, Tuple
 from pycodelib import common
 from openslide import OpenSlide
 from collections import OrderedDict
@@ -604,69 +604,33 @@ class SlideSet(TorchDataset):
     """
     Floor if not divisible
     """
-    def __init__(self, file_name, patch_size, level=0, by_row=True, img_transform=None):
+
+    def __init__(self, file_name, patch_size,
+                 level=0,
+                 stride: int = None,
+                 by_row=True,
+                 img_transform=None):
         self.file_name = file_name
         self.patch_size = patch_size
         self.level = level
         self.by_row = by_row
         self.img_transform = img_transform
+        # default stride == patch_size (no overlapping)
+        self.stride = stride if stride is not None else self.patch_size
 
     @staticmethod
-    def segment(osh, patch_size, level=0, by_row=True):
-        """
-        Use flooring instead of ceil -- cut off the remaining if smaller than patch_size
-        consistent to fold and stride trick
-        Args:
-            osh:
-            patch_size:
-            level:
-            by_row:
-
-        Returns:
-
-        """
-        width, height = osh.level_dimensions[level]
-        if by_row:
-            length = width
-        else:
-            length = height
-        step_num = length // patch_size  # np.ceil(length / patch_size).astype(np.int)
-        return step_num
-
-    @staticmethod
-    def idx2loc(osh, index, patch_size, level=0, by_row=True):
-        row_step_num = SlideSet.segment(osh, patch_size, level=level, by_row=by_row)
-        assert row_step_num > 0, f" too small compared to patch_size"
-        vert = index // row_step_num * patch_size
-        horiz = index % row_step_num * patch_size
-        return horiz, vert
-
-    @property
-    def osh(self):
-        return OpenSlide(self.file_name)
-
-    def thumbnail(self, level):
-        osh = self.osh
-        thumb = osh.get_thumbnail(osh.level_dimensions[level])
-        return np.asarray(thumb)
-
-    def __getitem__(self, index):
-        osh = self.osh
-        c, r = SlideSet.idx2loc(osh, index, self.patch_size, level=self.level, by_row=self.by_row)
-        pil_region = osh.read_region(location=(c, r), level=self.level, size=(self.patch_size, self.patch_size))
-        # read_region returns RGBA
-        pil_region = pil_region.convert('RGB')
-        if self.img_transform is not None:
-            pil_region = self.img_transform(pil_region)
-        return pil_region
+    def shape_helper(img_size: int, patch_size: int, stride: int):
+        return (img_size - patch_size) // stride + 1
 
     def len_width(self):
         width, _ = self.osh.level_dimensions[self.level]
-        return width // self.patch_size
+        # width // self.patch_size --> if stride == patch_size
+        return SlideSet.shape_helper(width, self.patch_size, self.stride)
 
     def len_height(self):
         _, height = self.osh.level_dimensions[self.level]
-        return height // self.patch_size
+        # height // self.patch_size
+        return SlideSet.shape_helper(height, self.patch_size, self.stride)
 
     @property
     def patch_map_shape(self):
@@ -679,6 +643,77 @@ class SlideSet(TorchDataset):
 
     def __len__(self):
         return self.len_width() * self.len_height()
+
+    @staticmethod
+    def segment(osh,
+                patch_size: int, stride: int,
+                level: int = 0,
+                by_row: bool = True):
+        """
+        How many patches in a row or column
+        Use flooring instead of ceil -- cut off the remaining if smaller than patch_size
+        consistent to fold and stride trick - so that it align with the mask image
+        Args:
+            osh:
+            patch_size:
+            stride:
+            level:
+            by_row:
+
+        Returns:
+
+        """
+        width, height = osh.level_dimensions[level]
+        if by_row:
+            length = width
+        else:
+            length = height
+        # step_num = length // patch_size  # np.ceil(length / patch_size).astype(np.int)
+        step_num = SlideSet.shape_helper(length, patch_size, stride=stride)
+        return step_num
+
+    @staticmethod
+    def idx2loc(chunk_step_num: int,
+                # osh: OpenSlide,
+                index: int,
+                stride: int,
+                by_row=True) -> Tuple[int, int]:
+        assert chunk_step_num > 0, f" too small compared to patch_size"
+
+        # horiz = index % chunk_step_num * patch_size
+        # vert = index // chunk_step_num * patch_size
+
+        chunk_remainder: int = (index % chunk_step_num) * stride
+        num_chunk: int = index // chunk_step_num * stride
+        output = (chunk_remainder, num_chunk) if by_row else (num_chunk, chunk_remainder)
+        return output
+
+    @property
+    def osh(self):
+        return OpenSlide(self.file_name)
+
+    def thumbnail(self, level):
+        osh = self.osh
+        thumb = osh.get_thumbnail(osh.level_dimensions[level])
+        return np.asarray(thumb)
+
+    def __getitem__(self, index):
+        osh = self.osh
+        chunk_step_num = SlideSet.segment(osh, self.patch_size,
+                                          stride=self.stride,
+                                          level=self.level,
+                                          by_row=self.by_row)
+        c, r = SlideSet.idx2loc(chunk_step_num,
+                                index=index,
+                                stride=self.stride,
+                                by_row=self.by_row)
+
+        pil_region = osh.read_region(location=(c, r), level=self.level, size=(self.patch_size, self.patch_size))
+        # read_region returns RGBA
+        pil_region = pil_region.convert('RGB')
+        if self.img_transform is not None:
+            pil_region = self.img_transform(pil_region)
+        return pil_region
 
 
 class ClassSpecifiedFolder(AbstractDataset):

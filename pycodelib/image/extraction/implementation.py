@@ -13,7 +13,9 @@ logger.setLevel(logging.CRITICAL)
 def extract_patch(image: np.ndarray,
                   patch_shape: Tuple[int, ...],
                   stride: int,
-                  flatten: bool = True) -> np.ndarray:
+                  flatten: bool = True,
+                  pad_mode: str = 'wrap',
+                  **kwargs) -> np.ndarray:
     """
     Extract patches from image.
     Shape: If flatten:  N * H * W* C. \
@@ -23,6 +25,7 @@ def extract_patch(image: np.ndarray,
         patch_shape (): Shape of the patch.
         stride ():  Extraction step.
         flatten ():
+        pad_mode: pad method if size is insufficient
 
     Returns:
 
@@ -44,7 +47,7 @@ def extract_patch(image: np.ndarray,
         pad_size = tuple((int(np.ceil(x)), int(np.floor(x))) for x in pad_size)
         # if len(pad_size) < image.ndim:
         #    pad_size = pad_size + ((0, 0), )
-        image = np.pad(image, pad_size, 'wrap')
+        image = np.pad(image, pad_size, pad_mode, **kwargs)
     patches = extract_patches_helper(image, patch_shape, stride)
     if flatten:
         patches = patches.reshape((-1,) + patch_shape)
@@ -54,16 +57,18 @@ def extract_patch(image: np.ndarray,
 def mask_thresholded(patches_im: np.ndarray,
                      patches_mask: np.ndarray,
                      hw_shape: Sequence[int],
-                     thresh: float,
-                     dispose: bool,
-                     mask_out: bool):
+                     thresh_patch: float,
+                     thresh_roi: float = 0.3,
+                     dispose: bool = True,
+                     mask_out: bool = False):
     """
 
     Args:
         patches_im:
         patches_mask:
         hw_shape:
-        thresh:
+        thresh_patch:
+        thresh_roi: ratio to entire roi. Disjunctive to thresh_patch.
         dispose:
         mask_out:
     Returns:
@@ -73,6 +78,10 @@ def mask_thresholded(patches_im: np.ndarray,
     # type_order[-1] as the type of mask.
     # mask_axis as the dimension of single masks in the high dimensional mask patch-array.
     # excluded in the mean calculation
+    mask_size = reduce(mul, hw_shape)
+    # binarize first
+    roi_sum = (patches_mask > 0).sum()
+    assert mask_size > 0
     mask_axis = tuple(
                         range(
                             -1*len(hw_shape),
@@ -82,9 +91,14 @@ def mask_thresholded(patches_im: np.ndarray,
     assert len(mask_axis) > 0
     # Tissue screening by mask region.
     # patches_mask may be un-normalized
-    valid_patch = (patches_mask > 0).mean(axis=mask_axis)
+    size_per_patch = (patches_mask > 0).sum(axis=mask_axis)
+    valid_patch = size_per_patch / mask_size
+    valid_ratio_to_roi = size_per_patch / roi_sum
 
-    valid_tag = valid_patch >= thresh
+    valid_patch_tag = valid_patch >= thresh_patch
+    valid_roi_tag = valid_ratio_to_roi >= thresh_roi
+    # logic or
+    valid_tag = valid_patch_tag | valid_roi_tag
     # whether flatten and dispose the output.
     # Assume
     row_ind, col_ind = valid_coordinate_rc(valid_tag, dispose)
