@@ -1,8 +1,9 @@
-from typing import Sequence
+from typing import Sequence, Union
 import logging
 from functools import reduce
 from operator import mul
 from .helpers import *
+from numbers import Number
 
 from pycodelib.image.extraction.helpers import extract_patches_helper
 
@@ -11,7 +12,7 @@ logger.setLevel(logging.CRITICAL)
 
 
 def extract_patch(image: np.ndarray,
-                  patch_shape: Tuple[int, ...],
+                  patch_shape: Union[int, Tuple[int, ...]],
                   stride: int,
                   flatten: bool = True,
                   pad_mode: str = 'wrap',
@@ -31,6 +32,8 @@ def extract_patch(image: np.ndarray,
 
     """
     assert not np.isscalar(image), f"does not support scalar input:{image}"
+    if isinstance(patch_shape, Number):
+        patch_shape = (patch_shape, ) * 2
     if len(patch_shape) == 0:
         patch_shape = 1
     assert image.ndim - len(patch_shape) <= 1

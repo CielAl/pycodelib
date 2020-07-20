@@ -30,7 +30,7 @@ class MultiAUC(Meter):
 
     # noinspection PyMethodOverriding
     def add(self, output, target):
-        output = MultiAUC.to_numpy(output)
+        output = np.atleast_2d(MultiAUC.to_numpy(output))
         target = MultiAUC.to_numpy(target)
         for target_ind in range(self.num_class):
             target_binary_label = (target == target_ind).astype(np.int64)

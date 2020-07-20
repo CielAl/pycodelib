@@ -19,10 +19,11 @@ import re
 from PIL import Image
 from lazy_property import LazyProperty
 from torchvision.datasets.folder import IMG_EXTENSIONS, default_loader
-
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.CRITICAL)
+
+Image.MAX_IMAGE_PIXELS = 1000000000
 # from abc import ABC, abstractmethod
 
 make_dataset = torchvision.datasets.folder.make_dataset
