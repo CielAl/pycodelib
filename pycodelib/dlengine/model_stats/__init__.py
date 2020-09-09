@@ -516,9 +516,13 @@ class DefaultStats(AbstractModelStats):
         model = engine.model
         optimizer = engine.optimizer
         save_flag = model is not None and optimizer is not None
+        if isinstance(model, nn.DataParallel):
+            model_state_dict = model.module.state_dict()
+        else:
+            model_state_dict = model.state_dict()
         if save_flag:
             checkpoint = {
-                'model_dict': model.state_dict(),
+                'model_dict': model_state_dict,
                 'optim_dict': optimizer.state_dict()
             }
             torch.save(checkpoint, chk_full)

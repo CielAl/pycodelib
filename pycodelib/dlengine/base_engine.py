@@ -78,7 +78,7 @@ class BaseEngine(AbstractEngine):
         if BaseEngine._empty_batch(data_batch):
             return self.dummy, self.dummy
 
-        img = data_batch[self.img_key]
+        img: torch.Tensor = data_batch[self.img_key]
         label_in = data_batch[self.label_key]
         index = data_batch[self.index_key].cpu().detach().numpy()
 
@@ -106,7 +106,7 @@ class BaseEngine(AbstractEngine):
 
         # if test mode: need to load the progress bar here
         if not state['train']:
-            state['iterator'] = tqdm(state['iterator'])
+            state['iterator'] = tqdm(state['iterator'], position=0, leave=True)
         self.model_stats.hook(self.on_start.__name__, state)
 
     def on_end(self, state: Dict[str, Any], **kwargs):
@@ -166,7 +166,7 @@ class BaseEngine(AbstractEngine):
 
         """
         state['train'] = True
-        state['iterator'] = tqdm(state['iterator'])
+        state['iterator'] = tqdm(state['iterator'], position=0, leave=True)
         self.model_stats.hook(self.on_start_epoch.__name__, state)
 
     def on_end_epoch_checkpoint_helper(self, state):

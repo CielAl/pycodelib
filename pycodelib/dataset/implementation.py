@@ -26,7 +26,43 @@ logger.setLevel(level=logging.CRITICAL)
 Image.MAX_IMAGE_PIXELS = 1000000000
 # from abc import ABC, abstractmethod
 
-make_dataset = torchvision.datasets.folder.make_dataset
+make_dataset_default = torchvision.datasets.folder.make_dataset
+has_file_allowed_extension = torchvision.datasets.folder.has_file_allowed_extension
+
+
+def make_dataset_folder(directory, class_to_idx, extensions=None, is_valid_file=None):
+    """
+    todo
+    Args:
+        directory:
+        class_to_idx:
+        extensions:
+        is_valid_file:
+
+    Returns:
+
+    """
+    instances = []
+    directory = os.path.expanduser(directory)
+    both_none = extensions is None and is_valid_file is None
+    both_something = extensions is not None and is_valid_file is not None
+    if both_none or both_something:
+        raise ValueError("Both extensions and is_valid_file cannot be None or not None at the same time")
+    if extensions is not None:
+        def is_valid_file(x):
+            return has_file_allowed_extension(x, extensions)
+    for target_class in sorted(class_to_idx.keys()):
+        class_index = class_to_idx[target_class]
+        target_dir = os.path.join(directory, target_class)
+        if not os.path.isdir(target_dir):
+            continue
+        for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):
+            for fname in sorted(fnames):
+                path = os.path.join(root, fname)
+                if is_valid_file(path):
+                    item = path, class_index
+                    instances.append(item)
+    return instances
 
 
 def validate_compatibility():
@@ -757,6 +793,25 @@ class ClassSpecifiedFolder(AbstractDataset):
     KEY_INDEX: str = 'index'
     KEY_IMG_ORIGIN: str = 'img_origin'
 
+    @staticmethod
+    def _find_classes(directory):
+        """
+        Finds the class folders in a dataset.
+
+        Args:
+            directory (string): Root directory path.
+
+        Returns:
+            tuple: (classes, class_to_idx) where classes are relative to (dir), and class_to_idx is a dictionary.
+
+        Ensures:
+            No class is a subdirectory of another.
+        """
+        classes = [d.name for d in os.scandir(directory) if d.is_dir()]
+        classes.sort()
+        class_to_idx = {classes[i]: i for i in range(len(classes))}
+        return classes, class_to_idx
+
     def __init__(self,
                  directory,
                  class_to_idx,
@@ -778,8 +833,10 @@ class ClassSpecifiedFolder(AbstractDataset):
                          truncate_size=truncate_size)
 
         extensions = file_extension if is_valid_file is None else None
+        if class_to_idx is None:
+            classes, class_to_idx = self._find_classes(directory)
         self.__class_to_idx = class_to_idx
-        self.__samples = make_dataset(directory, class_to_idx, extensions, is_valid_file)
+        self.__samples = make_dataset_default(directory, class_to_idx, extensions, is_valid_file)
         self.roi_name_parser = roi_name_parser\
             if roi_name_parser is not None else\
             ClassSpecifiedFolder._default_roi_name_parser
@@ -844,3 +901,40 @@ class ClassSpecifiedFolder(AbstractDataset):
     @staticmethod
     def imageio_loader(fname):
         return imageio.imread(fname)
+
+
+class SimpleFileListSet(TorchDataset):
+    KEY_IMG: str = 'img'
+    KEY_IMG_ORIGIN: str = 'origin'
+    KEY_FILENAME: str = 'filename'
+    KEY_INDEX: str = 'index'
+
+    def __init__(self, file_list: Sequence[str], loader: Callable = default_loader,
+                 img_transforms: Callable = None):
+        """
+        Retain the original order.
+        No Labels. Only to pass a list of files into the memory
+        Args:
+            file_list:
+        """
+        self.file_list = file_list
+        self.loader = loader
+        self.img_transforms = img_transforms
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, index):
+        o_dict = OrderedDict()
+        img_filename = self.file_list[index]
+        img_pil = self.loader(img_filename)
+        # origin is not affected by transformation, so it must be tensor or ndarray
+
+        if self.img_transforms is not None:
+            img_pil = self.img_transforms(img_pil)
+
+        o_dict[SimpleFileListSet.KEY_IMG] = img_pil
+        o_dict[SimpleFileListSet.KEY_FILENAME] = img_filename
+        o_dict[SimpleFileListSet.KEY_INDEX] = index
+        item = DatasetItem(o_dict)
+        return item

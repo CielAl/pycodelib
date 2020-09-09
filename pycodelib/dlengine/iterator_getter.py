@@ -86,7 +86,8 @@ class BaseGetter(IteratorBuilderDictSet):
                                                  for k, v in img_transform_dict.items()}
         return transform
 
-    def __init__(self, data_sets: Dict[bool, AbstractDataset], trans_collate: Dict[bool, TransformAutoCollate]):
+    def __init__(self, data_sets: Dict[bool, AbstractDataset], trans_collate: Dict[bool, TransformAutoCollate],
+                 dl_constructor: Callable):
         super().__init__(data_sets)
         self._transform: Dict[bool, TransformAutoCollate] = deepcopy(trans_collate)
 
@@ -95,6 +96,7 @@ class BaseGetter(IteratorBuilderDictSet):
         set_group_level = set(v.group_level for v in self._transform.values())
         assert len(set_group_level) == 1, f"Inconsistent group level. Got {set_group_level}"
         self.group_level = list(set_group_level)[0]
+        self.dl_constructor = dl_constructor
 
     @property
     def transform(self) -> Dict[bool, BasicTransform]:
@@ -113,7 +115,7 @@ class BaseGetter(IteratorBuilderDictSet):
                      pin_memory: bool = True,
                      batch_size: int = BATCH_SIZE,
                      truncate_size: float = np.inf,
-                     flatten_output: bool = False):
+                     flatten_output: bool = False,):
         """
             The visible interface to provide the DataLoader given training/testing mode.
         Args:
@@ -134,9 +136,10 @@ class BaseGetter(IteratorBuilderDictSet):
             shuffle = mode
         self.data_sets_collection[mode].flatten_output = flatten_output
         self.data_sets_collection[mode].truncate_size = truncate_size
-        return DataLoader(self.data_sets_collection[mode], num_workers=num_workers, pin_memory=pin_memory,
-                          batch_size=batch_size, shuffle=shuffle, drop_last=drop_last,
-                          collate_fn=self.transform[mode])
+        return self.dl_constructor(self.data_sets_collection[mode],
+                                   num_workers=num_workers, pin_memory=pin_memory,
+                                   batch_size=batch_size, shuffle=shuffle, drop_last=drop_last,
+                                   collate_fn=self.transform[mode])
 
     @classmethod
     def build(cls, data_sets_dict: Dict,
@@ -147,6 +150,7 @@ class BaseGetter(IteratorBuilderDictSet):
               label_key: str = 'label',
               original_key: str = 'img_original',
               type_order: np.ndarray = None,
+              dl_constructor: Callable = DataLoader,
               ):
         """
             Factory builder.
@@ -159,6 +163,7 @@ class BaseGetter(IteratorBuilderDictSet):
             label_key ():
             original_key ():
             type_order ():
+            dl_constructor (): Constructor of DataLoader
         Returns:
             iter_getter (H5DataGetter):
         """
@@ -173,7 +178,8 @@ class BaseGetter(IteratorBuilderDictSet):
                                               type_order=type_order,
                                               )
 
-        return cls(data_sets=data_sets_dict, trans_collate=img_transform_dict)
+        return cls(data_sets=data_sets_dict, trans_collate=img_transform_dict,
+                   dl_constructor=dl_constructor)
 
 
 class H5DataGetter(BaseGetter):

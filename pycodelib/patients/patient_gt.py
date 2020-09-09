@@ -58,7 +58,8 @@ class SheetCollection(PatientSlideCollection):
         return type(self).slide_name_static(self, file)
 
     @staticmethod
-    def slide_name_static(sheet_collection, file: str) -> Tuple[str, str]:
+    def slide_name_static(sheet_collection, file: str,
+                          match_class: bool = True) -> Tuple[str, str]:
         basename = os.path.basename(file)
         name_components: List[str] = basename.split(type(sheet_collection).SLIDE_SEPARATOR)
         # nonzero returns a tuple of array
@@ -72,11 +73,16 @@ class SheetCollection(PatientSlideCollection):
                 for component in name_components
             ]
         ).nonzero()[0]
-        assert index_match_array.size == 1 and index_match_array[0] < len(name_components) - 1, f"no match. Got:" \
-            f"{index_match_array},{name_components},{basename}"
+        if match_class:
+            assert index_match_array.size == 1 and index_match_array[0] < len(name_components) - 1, f"no match. Got:" \
+                f"{index_match_array},{name_components},{basename}"
+            index_match = index_match_array[0]
+            matched_class_comp = name_components[index_match]
+        else:
+            matched_class_comp = None
         slide_id = name_components[0].split()[0]
-        index_match = index_match_array[0]
-        return slide_id, name_components[index_match]
+
+        return slide_id, matched_class_comp
 
     def slide2patient(self, slide_id: str) -> str:
         return type(self).slide2patient_static(self, slide_id)
@@ -137,7 +143,7 @@ class SheetCollection(PatientSlideCollection):
     @staticmethod
     def key_to_row(sheet_col, filenames):
         file_basename_list: List[str] = [os.path.basename(f) for f in filenames]
-        slide_id_list: List[str] = [SheetCollection.slide_name_static(sheet_col, f)[0]
+        slide_id_list: List[str] = [SheetCollection.slide_name_static(sheet_col, f, match_class=False)[0]
                                     for f in file_basename_list]
         patient_id_list: List = [SheetCollection.slide2patient_static(sheet_col, slide_id)
                                  for slide_id in slide_id_list]

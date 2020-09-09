@@ -128,6 +128,7 @@ def mask_thresholded(patches_im: np.ndarray,
 def re_stitch(patches: np.ndarray, patch_size: Tuple[int, ...], dest_shape: Tuple[int, ...]):
     """
     Only works for non-overlapping patches.
+    2d patches must be expanded to [H, W, 1] in input, patch shape and dest_shape
     Returns:
 
     """
