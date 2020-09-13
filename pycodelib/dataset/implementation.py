@@ -654,7 +654,19 @@ class SlideSet(AbstractDataset):
                  img_transform: Callable = None,
                  flatten_output: bool = False,
                  truncate_size: float = np.inf):
+        """
 
+        Args:
+            file_name: Filename (with path) of the WSI
+            patch_size: Size of the tile. For convenience only support square tiles.
+            level: Which Level index in the pyramid, corresponding openslide_handle.level_dimensions.
+            stride: Stride moving along the axis. If None (default), then extract non-overlapping patches.
+            by_row: Moving along row or column
+            img_transform: Image Transforms. Callable. Post-processing after extracting a single tile. (e.g. rotation).
+                Default is None --> meaning no transforms.
+            flatten_output: config for "AbstractDataset". If True, flatten the output from named Dict to plain Tuple.
+            truncate_size: whether truncate the dataset. Set to np.inf --> use full dataset.
+        """
         img_key: str = SlideSet.DEFAULT_IMG_KEY
         coord_key: str = SlideSet.DEFAULT_COORD_KEY
         index_key: str = SlideSet.DEFAULT_INDEX_KEY
@@ -675,14 +687,35 @@ class SlideSet(AbstractDataset):
 
     @staticmethod
     def shape_helper(img_size: int, patch_size: int, stride: int):
+        """
+        Shape of patch grid after performing the sliding-window operation. e.g. for a 500x500 Image, 250x250 tile size,
+        and 250 stride (non_overlapping), the grid of output patch should be 2x2
+        Args:
+            img_size:
+            patch_size:
+            stride:
+
+        Returns:
+
+        """
         return (img_size - patch_size) // stride + 1
 
     def len_width(self):
+        """
+        Width of the patch grid. Help calculate the length of the entire patch sequence.
+        Returns:
+
+        """
         width, _ = self.osh.level_dimensions[self.level]
         # width // self.patch_size --> if stride == patch_size
         return SlideSet.shape_helper(width, self.patch_size, self.stride)
 
     def len_height(self):
+        """
+        Height of the patch grid. Help calculate the length of the entire patch sequence.
+        Returns:
+
+        """
         _, height = self.osh.level_dimensions[self.level]
         # height // self.patch_size
         return SlideSet.shape_helper(height, self.patch_size, self.stride)
@@ -690,13 +723,18 @@ class SlideSet(AbstractDataset):
     @property
     def patch_map_shape(self):
         """
-        H, W of patch map (non-overlapping)
+        H, W of patch map/Grid (non-overlapping)
         Returns:
 
         """
         return self.len_height(), self.len_width()
 
     def length_helper(self):
+        """
+        Length of Patch Sequence --> Area of patch grid.
+        Returns:
+
+        """
         return self.len_width() * self.len_height()
 
     @staticmethod
@@ -769,6 +807,14 @@ class SlideSet(AbstractDataset):
         return pil_region, (c, r)
 
     def get_item_helper(self, index):
+        """
+        Implementation of extractor in the interface __getitem__
+        Args:
+            index:
+
+        Returns:
+
+        """
         o_dict = OrderedDict()
 
         img, coordinate_rc = self.pil_img_from_index(index)
