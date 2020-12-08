@@ -4,6 +4,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+def _norm(img: np.ndarray):
+    if img.dtype == np.uint8 or img.max() > 1:
+        img = img.astype(np.float32)
+        img /= 255.
+    return img
+
+
 def heatmap_overlay_rgb(img: np.ndarray, heatmap: np.ndarray):
     """
 

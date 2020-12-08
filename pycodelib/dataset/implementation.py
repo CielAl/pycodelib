@@ -948,6 +948,10 @@ class ClassSpecifiedFolder(AbstractDataset):
     def imageio_loader(fname):
         return imageio.imread(fname)
 
+    @property
+    def class_to_idx(self):
+        return self.__class_to_idx
+
 
 class SimpleFileListSet(TorchDataset):
     KEY_IMG: str = 'img'
