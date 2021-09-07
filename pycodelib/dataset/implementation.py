@@ -18,7 +18,7 @@ from collections.abc import Mapping
 import re
 from PIL import Image
 from lazy_property import LazyProperty
-from torchvision.datasets.folder import IMG_EXTENSIONS, default_loader
+from torchvision.datasets.folder import IMG_EXTENSIONS
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.CRITICAL)
@@ -28,6 +28,16 @@ Image.MAX_IMAGE_PIXELS = 1000000000
 
 make_dataset_default = torchvision.datasets.folder.make_dataset
 has_file_allowed_extension = torchvision.datasets.folder.has_file_allowed_extension
+
+
+def default_loader(path: str):
+
+    from torchvision import get_image_backend
+    from PIL import ImageFile
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    with open(path, 'rb') as f:
+        img = Image.open(f)
+        return img.convert('RGB')
 
 
 def make_dataset_folder(directory, class_to_idx, extensions=None, is_valid_file=None):
@@ -325,7 +335,7 @@ class AbstractDataset(TorchDataset):
         validate_attribute = len(set(self.preserved_attributes) - set(items.keys())) == 0
 
         # equal length
-        eq_length = len(self.preserved_attributes) == len(items)
+        eq_length = len(self.preserved_attributes) <= len(items)
         # preserved attributes should at least be a subset of all types.
         assert validate_attribute and eq_length, f"Attributes Mismatch. {self.preserved_attributes}" \
             f" vs. {list(items.keys())}"
@@ -946,7 +956,11 @@ class ClassSpecifiedFolder(AbstractDataset):
 
     @staticmethod
     def imageio_loader(fname):
-        return imageio.imread(fname)
+        try:
+            return imageio.imread(fname)
+        except:
+            print(fname)
+            breakpoint()
 
     @property
     def class_to_idx(self):
