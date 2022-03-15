@@ -916,15 +916,19 @@ class ClassSpecifiedFolder(AbstractDataset):
         return len(self.samples)
 
     # noinspection PyUnusedLocal
+    # @staticmethod
+    # def _default_roi_name_parser(img_filename, *args, **kwargs):
+    #     delimiter = '_'
+    #     basename = os.path.basename(img_filename)
+    #     file_text, ext = os.path.splitext(basename)
+    #     roi_components = file_text.split('_')[:-2]
+    #     roi_file_text = delimiter.join(roi_components)
+    #     roi_filename = f"{roi_file_text}{ext}"
+    #     return roi_filename
+
     @staticmethod
     def _default_roi_name_parser(img_filename, *args, **kwargs):
-        delimiter = '_'
-        basename = os.path.basename(img_filename)
-        file_text, ext = os.path.splitext(basename)
-        roi_components = file_text.split('_')[:-2]
-        roi_file_text = delimiter.join(roi_components)
-        roi_filename = f"{roi_file_text}{ext}"
-        return roi_filename
+        return img_filename
 
     def get_item_helper(self, index) -> Union[OrderedDict, DatasetItem]:
         sample = self.samples[index]
