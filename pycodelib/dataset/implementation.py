@@ -1,3 +1,7 @@
+"""
+Some of my very old implementation of dict-based dataset with output fields formatted --> seems like it's 
+no longer necessary with the presence of better wrappers of trainers such as Lightning.
+"""
 import os
 import glob
 import tables

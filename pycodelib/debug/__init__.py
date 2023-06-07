@@ -1,3 +1,6 @@
+"""
+Just playing around with codes.
+"""
 import logging
 
 

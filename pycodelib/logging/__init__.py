@@ -1,1 +1,1 @@
-from .simple_logger import *
+from . import *

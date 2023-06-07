@@ -1,8 +1,8 @@
 from setuptools import setup
 
 __VERSION_MAJOR = 0
-__VERSION_MINOR = 0
-__VERSION_PATCH = 1
+__VERSION_MINOR = 1
+__VERSION_PATCH = 0
 __VERSION__ = f"{__VERSION_MAJOR}.{__VERSION_MINOR}.{__VERSION_PATCH}"
 
 __PROJECT_NAME = 'pycodelib'
@@ -10,13 +10,13 @@ __PACKAGE_NAME = 'pycodelib'
 
 setup(name=__PROJECT_NAME,
       version=__VERSION__,
-      description='HDF5 Database for Images',
+      description='collection of utils - practicing',
       long_description=open("README.md").read(),
       long_description_content_type="text/markdown",
       keywords=['util'],
       classifiers=[
           'Intended Audience :: Science/Research',
-          'Programming Language :: Python :: 3.6',
+          'Programming Language :: Python :: 3.8',
       ],
       url='https://github.com/CielAl/pycodelib',
       author='***',
@@ -35,5 +35,5 @@ setup(name=__PROJECT_NAME,
           'opencv-python>=3.4.5.20', 'torchnet', 'pandas', 'torchvision', 'visdom', 'matplotlib', 'imageio'
       ],
       zip_safe=False,
-      python_requires='>=3.6.0'
+      python_requires='>=3.8.0'
       )
